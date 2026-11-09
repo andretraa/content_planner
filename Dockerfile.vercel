@@ -18,7 +18,8 @@ FROM base AS runtime
 
 ENV PORT=80 \
     APP_ENV=production \
-    APP_DEBUG=false
+    APP_DEBUG=false \
+    SESSION_DRIVER=file
 
 COPY --from=dependencies /app/vendor ./vendor
 COPY Caddyfile /etc/caddy/Caddyfile
