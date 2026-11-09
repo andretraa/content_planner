@@ -19,6 +19,11 @@ FROM base AS runtime
 ENV PORT=80 \
     APP_ENV=production \
     APP_DEBUG=false \
+    DB_CONNECTION=pgsql \
+    DB_PORT=5432 \
+    DB_DATABASE=postgres \
+    DB_SSLMODE=require \
+    DB_SCHEMA=public \
     LOG_CHANNEL=stderr \
     SESSION_DRIVER=file
 

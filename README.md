@@ -64,10 +64,8 @@ Project Laravel ini menggunakan `vercel.json`, `Dockerfile.vercel`, dan FrankenP
    - `APP_ENV=production`
    - `APP_DEBUG=false`
    - `APP_URL=https://contentplanner-ashy.vercel.app`
-   - `DB_CONNECTION=pgsql`
-   - `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` dari koneksi Supabase (gunakan pooler yang sesuai untuk aplikasi serverless).
-   - `DB_SSLMODE=require`
-   - `DB_SCHEMA=public`
+   - `DB_HOST`, `DB_USERNAME`, dan `DB_PASSWORD` dari koneksi **Session pooler** Supabase (jangan kirim nilainya melalui chat).
+   - Container menetapkan default `DB_CONNECTION=pgsql`, `DB_PORT=5432`, `DB_DATABASE=postgres`, `DB_SSLMODE=require`, dan `DB_SCHEMA=public`; variabel-variabel ini dapat ditambahkan di Vercel bila ingin mengganti default.
 3. Deploy ulang dari branch yang terhubung.
 
 Sebelum deploy, jalankan `php artisan migrate --force` satu kali dari lingkungan yang memiliki akses ke database Supabase. File `.env` lokal, database SQLite, data JSON, cache, dan log tidak disalin ke Docker image; data production disimpan di Supabase. Image memasang ekstensi PDO PostgreSQL untuk koneksi tersebut.
