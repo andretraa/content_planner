@@ -37,6 +37,23 @@ php artisan serve
 
 Buka browser dan akses `http://localhost:8000`
 
+### Supabase (PostgreSQL)
+
+Aplikasi menyimpan laporan, jadwal, dan ide konten menggunakan database Laravel. Untuk menggunakan Supabase, pilih **Session pooler** pada Supabase Dashboard > Project Settings > Database (atau koneksi PostgreSQL yang dapat dijangkau dari hosting), lalu atur `.env` lokal:
+
+```dotenv
+DB_CONNECTION=pgsql
+DB_HOST=host-pooler-dari-supabase
+DB_PORT=5432
+DB_DATABASE=postgres
+DB_USERNAME=username-pooler-dari-supabase
+DB_PASSWORD=password-database-supabase
+DB_SSLMODE=require
+DB_SCHEMA=public
+```
+
+Jalankan `php artisan migrate --force` satu kali setelah mengatur koneksi. Migrasi membuat tabel `reports`, `schedules`, dan `ideas`; jika file JSON lokal lama tersedia, record akan diimpor dengan ID yang sama. Jangan commit atau membagikan kredensial database.
+
 ## Deploy ke Vercel
 
 Project Laravel ini menggunakan `Dockerfile.vercel` dan FrankenPHP agar Vercel menjalankan PHP, bukan menyajikan `public/index.php` sebagai file statis.
@@ -47,9 +64,13 @@ Project Laravel ini menggunakan `Dockerfile.vercel` dan FrankenPHP agar Vercel m
    - `APP_ENV=production`
    - `APP_DEBUG=false`
    - `APP_URL=https://contentplanner-ashy.vercel.app`
+   - `DB_CONNECTION=pgsql`
+   - `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` dari koneksi Supabase (gunakan pooler yang sesuai untuk aplikasi serverless).
+   - `DB_SSLMODE=require`
+   - `DB_SCHEMA=public`
 3. Deploy ulang dari branch yang terhubung.
 
-File `.env` lokal, database SQLite, data JSON, cache, dan log tidak disalin ke Docker image. Data aplikasi saat ini disimpan di file JSON lokal, sehingga perubahan yang dibuat saat aplikasi berjalan di Vercel tidak memiliki penyimpanan persisten dan dapat hilang saat instance diganti. Gunakan database atau object storage eksternal jika data harus tetap tersimpan di production.
+Sebelum deploy, jalankan `php artisan migrate --force` satu kali dari lingkungan yang memiliki akses ke database Supabase. File `.env` lokal, database SQLite, data JSON, cache, dan log tidak disalin ke Docker image; data production disimpan di Supabase. Image memasang ekstensi PDO PostgreSQL untuk koneksi tersebut.
 
 ## Tech Stack
 

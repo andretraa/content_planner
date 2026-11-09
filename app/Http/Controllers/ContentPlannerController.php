@@ -3,27 +3,13 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ContentPlannerController extends Controller
 {
-    protected function getStoragePath()
-    {
-        return storage_path('app/schedules.json');
-    }
-
     protected function getSchedules()
     {
-        $path = $this->getStoragePath();
-        if (!file_exists($path)) {
-            return [];
-        }
-        $data = json_decode(file_get_contents($path), true);
-        return is_array($data) ? $data : [];
-    }
-
-    protected function saveSchedules(array $schedules)
-    {
-        file_put_contents($this->getStoragePath(), json_encode(array_values($schedules), JSON_PRETTY_PRINT));
+        return DB::table('schedules')->orderBy('id')->get()->map(fn ($item) => (array) $item)->all();
     }
 
     public function index()
@@ -55,13 +41,9 @@ class ContentPlannerController extends Controller
             'tag' => 'nullable|string'
         ]);
 
-        $schedules = $this->getSchedules();
-        $newId = count($schedules) > 0 ? (max(array_column($schedules, 'id')) + 1) : 1;
-
         $newItem = [
-            'id' => $newId,
             'platform' => strtolower($validated['platform']),
-            'tag' => $validated['tag'] ?: ucfirst($validated['platform']),
+            'tag' => ($validated['tag'] ?? null) ?: ucfirst($validated['platform']),
             'title' => $validated['title'],
             'date' => $validated['date'],
             'time' => $validated['time'],
@@ -69,8 +51,8 @@ class ContentPlannerController extends Controller
             'description' => $validated['description'] ?? ''
         ];
 
-        $schedules[] = $newItem;
-        $this->saveSchedules($schedules);
+        $newItem['id'] = DB::table('schedules')->insertGetId($newItem);
+        $schedules = $this->getSchedules();
 
         if ($request->wantsJson() || $request->ajax()) {
             return response()->json([
@@ -96,31 +78,24 @@ class ContentPlannerController extends Controller
             'tag' => 'nullable|string'
         ]);
 
-        $schedules = $this->getSchedules();
-        $found = false;
+        $updated = DB::table('schedules')->where('id', $id)->update([
+            'platform' => strtolower($validated['platform']),
+            'tag' => ($validated['tag'] ?? null) ?: ucfirst($validated['platform']),
+            'title' => $validated['title'],
+            'date' => $validated['date'],
+            'time' => $validated['time'],
+            'status' => $validated['status'],
+            'description' => $validated['description'] ?? '',
+        ]);
 
-        foreach ($schedules as &$item) {
-            if ($item['id'] == $id) {
-                $item['platform'] = strtolower($validated['platform']);
-                $item['tag'] = $validated['tag'] ?: ucfirst($validated['platform']);
-                $item['title'] = $validated['title'];
-                $item['date'] = $validated['date'];
-                $item['time'] = $validated['time'];
-                $item['status'] = $validated['status'];
-                $item['description'] = $validated['description'] ?? '';
-                $found = true;
-                break;
-            }
-        }
-
-        if (!$found) {
+        if (!$updated && !DB::table('schedules')->where('id', $id)->exists()) {
             if ($request->wantsJson() || $request->ajax()) {
                 return response()->json(['status' => 'error', 'message' => 'Jadwal tidak ditemukan'], 404);
             }
             return redirect()->route('content-planner')->with('error', 'Jadwal tidak ditemukan');
         }
 
-        $this->saveSchedules($schedules);
+        $schedules = $this->getSchedules();
 
         if ($request->wantsJson() || $request->ajax()) {
             return response()->json([
@@ -135,22 +110,17 @@ class ContentPlannerController extends Controller
 
     public function apiDestroy(Request $request, $id)
     {
+        DB::table('schedules')->where('id', $id)->delete();
         $schedules = $this->getSchedules();
-        $filtered = array_filter($schedules, function ($item) use ($id) {
-            return $item['id'] != $id;
-        });
-
-        $this->saveSchedules($filtered);
 
         if ($request->wantsJson() || $request->ajax()) {
             return response()->json([
                 'status' => 'success',
                 'message' => 'Jadwal berhasil dihapus!',
-                'schedules' => array_values($filtered)
+                'schedules' => $schedules
             ]);
         }
 
         return redirect()->route('content-planner')->with('success', 'Jadwal berhasil dihapus!');
     }
 }
-

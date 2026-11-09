@@ -3,43 +3,23 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class LaporanSosmedController extends Controller
 {
-    protected function getStoragePath()
-    {
-        return storage_path('app/reports.json');
-    }
-
     protected function getReports()
     {
-        $path = $this->getStoragePath();
-        if (!file_exists($path)) {
-            return [];
-        }
-        $data = json_decode(file_get_contents($path), true);
-        return is_array($data) ? $data : [];
-    }
-
-    protected function saveReports(array $reports)
-    {
-        file_put_contents($this->getStoragePath(), json_encode(array_values($reports), JSON_PRETTY_PRINT));
+        return DB::table('reports')->orderBy('id')->get()->map(fn ($item) => (array) $item)->all();
     }
 
     protected function getSchedules()
     {
-        $path = storage_path('app/schedules.json');
-        if (!file_exists($path)) return [];
-        $data = json_decode(file_get_contents($path), true);
-        return is_array($data) ? $data : [];
+        return DB::table('schedules')->orderBy('id')->get()->map(fn ($item) => (array) $item)->all();
     }
 
     protected function getIdeas()
     {
-        $path = storage_path('app/ideas.json');
-        if (!file_exists($path)) return [];
-        $data = json_decode(file_get_contents($path), true);
-        return is_array($data) ? $data : [];
+        return DB::table('ideas')->orderBy('id')->get()->map(fn ($item) => (array) $item)->all();
     }
 
     public function index()
@@ -81,15 +61,11 @@ class LaporanSosmedController extends Controller
             'idea_id' => 'nullable|integer',
         ]);
 
-        $reports = $this->getReports();
-        $newId = count($reports) > 0 ? (max(array_column($reports, 'id')) + 1) : 1;
-
         $newItem = [
-            'id' => $newId,
             'title' => $validated['title'],
             'description' => $validated['description'] ?? 'Diposting baru saja',
             'platform' => strtolower($validated['platform']),
-            'tag' => $validated['tag'] ?: ucfirst($validated['platform']),
+            'tag' => ($validated['tag'] ?? null) ?: ucfirst($validated['platform']),
             'followers' => !empty($validated['followers']) ? $validated['followers'] : '-',
             'tayangan' => !empty($validated['tayangan']) ? $validated['tayangan'] : '-',
             'jangkauan' => !empty($validated['jangkauan']) ? $validated['jangkauan'] : '-',
@@ -100,8 +76,8 @@ class LaporanSosmedController extends Controller
             'idea_id' => $validated['idea_id'] ?? null,
         ];
 
-        $reports[] = $newItem;
-        $this->saveReports($reports);
+        $newItem['id'] = DB::table('reports')->insertGetId($newItem);
+        $reports = $this->getReports();
 
         if ($request->wantsJson() || $request->ajax()) {
             return response()->json([
@@ -130,34 +106,27 @@ class LaporanSosmedController extends Controller
             'period' => 'nullable|string',
         ]);
 
-        $reports = $this->getReports();
-        $found = false;
-
-        foreach ($reports as &$item) {
-            if ($item['id'] == $id) {
-                $item['title'] = $validated['title'];
-                $item['description'] = $validated['description'] ?? $item['description'];
-                $item['platform'] = strtolower($validated['platform']);
-                $item['tag'] = $validated['tag'] ?: ucfirst($validated['platform']);
-                $item['followers'] = !empty($validated['followers']) ? $validated['followers'] : '-';
-                $item['tayangan'] = !empty($validated['tayangan']) ? $validated['tayangan'] : '-';
-                $item['jangkauan'] = !empty($validated['jangkauan']) ? $validated['jangkauan'] : '-';
-                $item['engagement'] = !empty($validated['engagement']) ? (str_contains($validated['engagement'], '%') ? $validated['engagement'] : $validated['engagement'].'%') : '-%';
-                if (!empty($validated['date'])) $item['date'] = $validated['date'];
-                if (!empty($validated['period'])) $item['period'] = $validated['period'];
-                $found = true;
-                break;
-            }
-        }
-
-        if (!$found) {
+        $report = DB::table('reports')->where('id', $id)->first();
+        if (!$report) {
             if ($request->wantsJson() || $request->ajax()) {
                 return response()->json(['status' => 'error', 'message' => 'Laporan tidak ditemukan'], 404);
             }
             return redirect()->route('laporan-sosmed')->with('error', 'Laporan tidak ditemukan');
         }
 
-        $this->saveReports($reports);
+        DB::table('reports')->where('id', $id)->update([
+            'title' => $validated['title'],
+            'description' => $validated['description'] ?? $report->description,
+            'platform' => strtolower($validated['platform']),
+            'tag' => ($validated['tag'] ?? null) ?: ucfirst($validated['platform']),
+            'followers' => !empty($validated['followers']) ? $validated['followers'] : '-',
+            'tayangan' => !empty($validated['tayangan']) ? $validated['tayangan'] : '-',
+            'jangkauan' => !empty($validated['jangkauan']) ? $validated['jangkauan'] : '-',
+            'engagement' => !empty($validated['engagement']) ? (str_contains($validated['engagement'], '%') ? $validated['engagement'] : $validated['engagement'].'%') : '-%',
+            'date' => !empty($validated['date']) ? $validated['date'] : $report->date,
+            'period' => !empty($validated['period']) ? $validated['period'] : $report->period,
+        ]);
+        $reports = $this->getReports();
 
         if ($request->wantsJson() || $request->ajax()) {
             return response()->json([
@@ -172,18 +141,14 @@ class LaporanSosmedController extends Controller
 
     public function apiDestroy(Request $request, $id)
     {
+        DB::table('reports')->where('id', $id)->delete();
         $reports = $this->getReports();
-        $filtered = array_filter($reports, function ($item) use ($id) {
-            return $item['id'] != $id;
-        });
-
-        $this->saveReports($filtered);
 
         if ($request->wantsJson() || $request->ajax()) {
             return response()->json([
                 'status' => 'success',
                 'message' => 'Laporan berhasil dihapus!',
-                'reports' => array_values($filtered)
+                'reports' => $reports
             ]);
         }
 
@@ -192,23 +157,13 @@ class LaporanSosmedController extends Controller
 
     public function apiFromSchedule(Request $request, $id)
     {
-        $schedules = $this->getSchedules();
-        $schedule = null;
-        foreach ($schedules as $s) {
-            if ($s['id'] == $id) {
-                $schedule = $s;
-                break;
-            }
-        }
+        $schedule = DB::table('schedules')->where('id', $id)->first();
         if (!$schedule) {
             return response()->json(['status' => 'error', 'message' => 'Jadwal tidak ditemukan'], 404);
         }
-
-        $reports = $this->getReports();
-        $newId = count($reports) > 0 ? (max(array_column($reports, 'id')) + 1) : 1;
+        $schedule = (array) $schedule;
 
         $newReport = [
-            'id' => $newId,
             'title' => $schedule['title'],
             'description' => $schedule['description'] ?: 'Diposting dari Content Planner',
             'platform' => strtolower($schedule['platform']),
@@ -223,8 +178,8 @@ class LaporanSosmedController extends Controller
             'idea_id' => $schedule['idea_id'] ?? null,
         ];
 
-        $reports[] = $newReport;
-        $this->saveReports($reports);
+        $newReport['id'] = DB::table('reports')->insertGetId($newReport);
+        $reports = $this->getReports();
 
         return response()->json([
             'status' => 'success',
@@ -236,23 +191,13 @@ class LaporanSosmedController extends Controller
 
     public function apiFromIdea(Request $request, $id)
     {
-        $ideas = $this->getIdeas();
-        $idea = null;
-        foreach ($ideas as $item) {
-            if ($item['id'] == $id) {
-                $idea = $item;
-                break;
-            }
-        }
+        $idea = DB::table('ideas')->where('id', $id)->first();
         if (!$idea) {
             return response()->json(['status' => 'error', 'message' => 'Ide tidak ditemukan'], 404);
         }
-
-        $reports = $this->getReports();
-        $newId = count($reports) > 0 ? (max(array_column($reports, 'id')) + 1) : 1;
+        $idea = (array) $idea;
 
         $newReport = [
-            'id' => $newId,
             'title' => $idea['title'],
             'description' => $idea['description'] ?: 'Diposting dari Ide Konten',
             'platform' => strtolower($idea['platform']),
@@ -267,8 +212,8 @@ class LaporanSosmedController extends Controller
             'idea_id' => $idea['id'],
         ];
 
-        $reports[] = $newReport;
-        $this->saveReports($reports);
+        $newReport['id'] = DB::table('reports')->insertGetId($newReport);
+        $reports = $this->getReports();
 
         return response()->json([
             'status' => 'success',
