@@ -72,7 +72,7 @@ Project Laravel ini menggunakan `vercel.json`, `Dockerfile.vercel`, dan FrankenP
 
 Sebelum deploy, jalankan `php artisan migrate --force` satu kali dari lingkungan yang memiliki akses ke database Supabase. File `.env` lokal, database SQLite, data JSON, cache, dan log tidak disalin ke Docker image; data production disimpan di Supabase. Image memasang ekstensi PDO PostgreSQL untuk koneksi tersebut.
 
-Konfigurasi inti Laravel (termasuk encryption key, Blade views, logging, dan session) disertakan di `config/`. `APP_KEY` wajib diisi di Vercel. Session menggunakan penyimpanan file sementara secara default agar request tidak membutuhkan tabel `sessions` terpisah di Supabase.
+Konfigurasi inti Laravel (termasuk encryption key, Blade views, logging, dan session) disertakan di `config/`. `APP_KEY` wajib diisi di Vercel. Container mengirim log Laravel ke `stderr` agar error aplikasi terlihat pada Runtime Logs Vercel. Session menggunakan penyimpanan file sementara secara default agar request tidak membutuhkan tabel `sessions` terpisah di Supabase.
 
 ## Tech Stack
 

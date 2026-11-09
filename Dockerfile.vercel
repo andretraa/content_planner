@@ -19,6 +19,7 @@ FROM base AS runtime
 ENV PORT=80 \
     APP_ENV=production \
     APP_DEBUG=false \
+    LOG_CHANNEL=stderr \
     SESSION_DRIVER=file
 
 COPY --from=dependencies /app/vendor ./vendor
