@@ -1,89 +1,57 @@
-# CreatorPulse - Social Media Report Dashboard
+# Planning Kundrew
 
-Dashboard laporan sosial media multi-platform yang dibangun dengan Laravel.
+Dashboard berbahasa Indonesia untuk mengelola ide konten, jadwal publikasi, dan laporan performa sosial media. Aplikasi menggunakan Next.js App Router, TypeScript, dan Supabase PostgreSQL.
 
 ## Fitur
 
-- **Laporan Sosmed** - Overview analytics dengan grafik performa, distribusi platform, dan konten terbaik
-- **Content Planner** - Kalender konten dengan drag-and-drop scheduling
-- **Ide Konten** - Kanban board untuk brainstorming dan ideation
-- **Pengaturan** - Manajemen akun dan preferensi
+- **Laporan Sosmed** — ringkasan performa, filter konten, CRUD laporan, dan ekspor CSV.
+- **Content Planner** — kalender bulanan/mingguan, daftar jadwal, pengubahan status, dan sinkronisasi ke laporan.
+- **Ide Konten** — papan Kanban empat tahap, CRUD ide, penjadwalan ide, dan sinkronisasi ke laporan.
+- **Pengaturan** — preferensi akun serta notifikasi.
+- Animasi transisi halaman, kartu, dan dialog; animasi menghormati preferensi `prefers-reduced-motion`.
 
-## Instalasi
+## Menjalankan secara lokal
 
-### Prerequisites
-- PHP >= 8.2
-- Composer
-- Node.js (opsional)
-
-### Setup
+Prasyarat: Node.js 20.9 atau lebih baru dan akses ke database Supabase PostgreSQL.
 
 ```bash
-# Clone atau masuk ke direktori project
-cd creator-pulse
-
-# Install dependencies
-composer install
-
-# Copy environment file
-cp .env.example .env
-
-# Generate application key
-php artisan key:generate
-
-# Jalankan server development
-php artisan serve
+npm install
+Copy-Item .env.example .env.local
 ```
 
-Buka browser dan akses `http://localhost:8000`
+Isi `DB_URL` di `.env.local` menggunakan connection string **Session pooler** Supabase. Jangan commit atau membagikan kredensial database. Jalankan SQL di [`database/schema.next.sql`](./database/schema.next.sql) sekali jika database belum mempunyai tabel aplikasi. Bila tabel `reports`, `schedules`, dan `ideas` sudah tersedia, aplikasi dapat langsung menggunakan tabel tersebut.
 
-### Supabase (PostgreSQL)
+Database SQLite Laravel lama, bila ada, dibiarkan utuh tetapi tidak dibaca atau diimpor otomatis oleh Next.js. Pastikan data yang ingin dipakai sudah ada di database Supabase sebelum beralih.
 
-Aplikasi menyimpan laporan, jadwal, dan ide konten menggunakan database Laravel. Untuk menggunakan Supabase, pilih **Session pooler** pada Supabase Dashboard > Project Settings > Database (atau koneksi PostgreSQL yang dapat dijangkau dari hosting), lalu atur `.env` lokal:
-
-```dotenv
-DB_CONNECTION=pgsql
-DB_HOST=host-pooler-dari-supabase
-DB_PORT=5432
-DB_DATABASE=postgres
-DB_USERNAME=username-pooler-dari-supabase
-DB_PASSWORD=password-database-supabase
-DB_SSLMODE=require
-DB_SCHEMA=public
+```bash
+npm run dev
 ```
 
-Jalankan `php artisan migrate --force` satu kali setelah mengatur koneksi. Migrasi membuat tabel `reports`, `schedules`, dan `ideas`; jika file JSON lokal lama tersedia, record akan diimpor dengan ID yang sama. Jangan commit atau membagikan kredensial database.
+Buka `http://localhost:3000`. Perintah pemeriksaan yang tersedia:
+
+```bash
+npm run typecheck
+npm run build
+```
 
 ## Deploy ke Vercel
 
-Project Laravel ini menggunakan `vercel.json`, `Dockerfile.vercel`, dan FrankenPHP agar Vercel mengirim semua rute ke container PHP, bukan menyajikan `public/index.php` sebagai file statis.
+Hubungkan repository ke Vercel dengan root directory repository dan framework preset **Next.js**. Tambahkan variabel lingkungan berikut di Vercel untuk Production dan Preview:
 
-1. Pastikan root directory project Vercel menunjuk ke root repository dan pilih framework preset **Container** pada pengaturan Build & Development.
-2. Tambahkan environment variables di Vercel:
-   - `APP_KEY`: hasilkan dengan `php artisan key:generate --show` secara lokal, lalu simpan nilainya hanya di pengaturan Vercel.
-   - `APP_ENV=production`
-   - `APP_DEBUG=false`
-   - `APP_URL=https://contentplanner-ashy.vercel.app`
-   - `DB_HOST`, `DB_USERNAME`, dan `DB_PASSWORD` dari koneksi **Session pooler** Supabase (jangan kirim nilainya melalui chat).
-   - Container menetapkan default `DB_CONNECTION=pgsql`, `DB_PORT=5432`, `DB_DATABASE=postgres`, `DB_SSLMODE=require`, dan `DB_SCHEMA=public`; variabel-variabel ini dapat ditambahkan di Vercel bila ingin mengganti default.
-3. Deploy ulang dari branch yang terhubung.
+- `DB_URL` — connection string PostgreSQL Supabase Session pooler.
+- `DB_SSLMODE=require`
+- `DB_SCHEMA=public`
 
-Sebelum deploy, jalankan `php artisan migrate --force` satu kali dari lingkungan yang memiliki akses ke database Supabase. File `.env` lokal, database SQLite, data JSON, cache, dan log tidak disalin ke Docker image; data production disimpan di Supabase. Image memasang ekstensi PDO PostgreSQL untuk koneksi tersebut.
+Atau gunakan variabel terpisah `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, dan `DB_PASSWORD`. Terapkan [`database/schema.next.sql`](./database/schema.next.sql) sekali ke database yang akan digunakan, lalu deploy. Jika Supabase yang sama sudah berisi tabel aplikasi, data laporan, jadwal, dan ide tetap berada di sana tanpa proses salin ulang.
 
-Konfigurasi inti Laravel (termasuk encryption key, Blade views, logging, dan session) disertakan di `config/`. `APP_KEY` wajib diisi di Vercel. Container mengirim log Laravel ke `stderr` agar error aplikasi terlihat pada Runtime Logs Vercel. Session menggunakan penyimpanan file sementara secara default agar request tidak membutuhkan tabel `sessions` terpisah di Supabase.
-
-## Tech Stack
-
-- **Backend**: Laravel 11
-- **Frontend**: Tailwind CSS (CDN), Chart.js
-- **Font**: Poppins (Google Fonts)
-
-## Struktur Halaman
+## Route
 
 | Route | Halaman |
-|-------|---------|
-| `/` | Laporan Sosmed (default) |
-| `/laporan-sosmed` | Overview Analytics |
-| `/content-planner` | Content Calendar |
-| `/ide-konten` | Content Ideation Board |
-| `/pengaturan` | Settings |
+|---|---|
+| `/` | Laporan Sosmed |
+| `/laporan-sosmed` | Laporan Sosmed |
+| `/content-planner` | Content Planner |
+| `/ide-konten` | Ide Konten |
+| `/pengaturan` | Pengaturan |
+
+API Next.js tersedia di `/api/reports`, `/api/schedules`, dan `/api/ideas`.
