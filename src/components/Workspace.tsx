@@ -71,18 +71,6 @@ function platformClass(value: unknown) {
   return `platform platform-${String(value ?? "instagram").toLowerCase()}`;
 }
 
-function subscribeToAccounts(callback: () => void) {
-  const listener = (event: StorageEvent) => {
-    if (event.key === "planning-kundrew-accounts" || event.key === null) callback();
-  };
-  window.addEventListener("storage", listener);
-  return () => window.removeEventListener("storage", listener);
-}
-
-function getAccountsSnapshot() {
-  return window.localStorage.getItem("planning-kundrew-accounts") ?? "[]";
-}
-
 function subscribeToSettings(callback: () => void) {
   const listener = (event: StorageEvent) => {
     if (event.key === "planning-kundrew-settings" || event.key === null) callback();
@@ -93,6 +81,51 @@ function subscribeToSettings(callback: () => void) {
 
 function getSettingsSnapshot() {
   return window.localStorage.getItem("planning-kundrew-settings") ?? "{}";
+}
+
+function parseSettings(snapshot: string): Record<string, string> {
+  try {
+    const saved: unknown = JSON.parse(snapshot);
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+      return Object.fromEntries(Object.entries(saved).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+    }
+  } catch {
+    return {};
+  }
+  return {};
+}
+
+function PlatformIcon({ platform }: { platform: string }) {
+  const name = platform.toLowerCase();
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" className="platform-icon">
+      {name === "instagram" && (
+        <>
+          <rect x="3.5" y="3.5" width="17" height="17" rx="5" />
+          <circle cx="12" cy="12" r="4" />
+          <circle cx="17.5" cy="6.8" r=".8" className="platform-icon-dot" />
+        </>
+      )}
+      {name === "tiktok" && (
+        <>
+          <path d="M14.4 4v10.1a4.2 4.2 0 1 1-3.5-4.1" />
+          <path d="M14.4 4c.5 2.5 2.1 4 4.6 4.4" />
+        </>
+      )}
+      {name === "threads" && (
+        <>
+          <path d="M17.3 8.6c-.8-2.2-2.5-3.4-5.2-3.4-3.7 0-5.9 2.5-5.9 6.8 0 4.2 2.1 6.9 5.7 6.9 3.2 0 5.1-1.7 5.1-4.4 0-2.3-1.4-3.7-3.8-3.7-1.8 0-3 .8-3.4 2.2" />
+          <path d="M11 12.6c4.5-1.2 7.4.3 7.4 3.2 0 1.9-1.4 3.1-3.6 3.1" />
+        </>
+      )}
+      {name === "youtube" && (
+        <>
+          <rect x="3" y="5.5" width="18" height="13" rx="3.5" />
+          <path d="m10 9 5.5 3-5.5 3Z" className="platform-icon-play" />
+        </>
+      )}
+    </svg>
+  );
 }
 
 function Icon({ name }: { name: string }) {
@@ -130,15 +163,10 @@ export default function Workspace({ page }: { page: Page }) {
   const [period, setPeriod] = useState("mingguan");
   const [calendarView, setCalendarView] = useState<"month" | "week" | "list">("month");
   const [calendarDate, setCalendarDate] = useState(() => new Date());
-  const accountsSnapshot = useSyncExternalStore(subscribeToAccounts, getAccountsSnapshot, () => "[]");
-  const connectedAccounts = useMemo(() => {
-    try {
-      const values: unknown = JSON.parse(accountsSnapshot);
-      return Array.isArray(values) && values.every((value) => typeof value === "string") ? values : [];
-    } catch {
-      return [];
-    }
-  }, [accountsSnapshot]);
+  const settingsSnapshot = useSyncExternalStore(subscribeToSettings, getSettingsSnapshot, () => "{}");
+  const settings = useMemo(() => parseSettings(settingsSnapshot), [settingsSnapshot]);
+  const workspaceName = settings.workspaceName?.trim() || "Kundrew Studio";
+  const workspaceInitial = workspaceName.charAt(0).toUpperCase() || "K";
 
   const loadData = useCallback(async () => {
     try {
@@ -292,31 +320,19 @@ export default function Workspace({ page }: { page: Page }) {
   const averageEngagement = reports.length
     ? reports.reduce((sum, report) => sum + (Number.parseFloat(String(report.engagement ?? "").replace(/[^\d.-]/g, "")) || 0), 0) / reports.length
     : 0;
-  const accountToggle = (name: string) => {
-    const values = connectedAccounts.includes(name) ? connectedAccounts.filter((item) => item !== name) : [...connectedAccounts, name];
-    const snapshot = JSON.stringify(values);
-    try {
-      window.localStorage.setItem("planning-kundrew-accounts", snapshot);
-      window.dispatchEvent(new StorageEvent("storage", { key: "planning-kundrew-accounts", newValue: snapshot }));
-    } catch {
-      setError("Preferensi akun tidak dapat disimpan di browser ini.");
-    }
-  };
-
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const values: Record<string, string> = {};
-    new FormData(event.currentTarget).forEach((value, key) => {
-      if (typeof value === "string") values[key] = value;
-    });
-    event.currentTarget.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((input) => {
-      values[input.name] = String(input.checked);
-    });
-    const snapshot = JSON.stringify(values);
+    const workspaceName = new FormData(event.currentTarget).get("workspaceName");
+    const normalizedName = typeof workspaceName === "string" ? workspaceName.trim() : "";
+    if (!normalizedName) {
+      setError("Nama workspace wajib diisi.");
+      return;
+    }
+    const snapshot = JSON.stringify({ workspaceName: normalizedName });
     try {
       window.localStorage.setItem("planning-kundrew-settings", snapshot);
       window.dispatchEvent(new StorageEvent("storage", { key: "planning-kundrew-settings", newValue: snapshot }));
-      setNotice("Preferensi berhasil disimpan di browser ini.");
+      setNotice("Pengaturan berhasil disimpan di browser ini.");
     } catch {
       setError("Preferensi tidak dapat disimpan di browser ini.");
     }
@@ -330,9 +346,8 @@ export default function Workspace({ page }: { page: Page }) {
           <span><span className="brand-kicker">PLANNING</span><strong>Kundrew</strong></span>
         </Link>
         <div className="workspace-switcher">
-          <span className="workspace-avatar">K</span>
-          <span className="workspace-name"><strong>Kundrew Studio</strong><small>Workspace pribadi</small></span>
-          <span className="switcher-dots">···</span>
+          <span className="workspace-avatar">{workspaceInitial}</span>
+          <span className="workspace-name"><strong>{workspaceName}</strong><small>Workspace pribadi</small></span>
         </div>
         <p className="nav-caption">WORKSPACE</p>
         <nav className="side-nav" aria-label="Navigasi utama">
@@ -351,14 +366,13 @@ export default function Workspace({ page }: { page: Page }) {
             <p>Mulai dari inspirasi, lanjutkan dengan rencana, ukur dampaknya.</p>
             <Link href="/ide-konten">Buka papan ide <Icon name="arrow" /></Link>
           </div>
-          <div className="profile-mini"><span className="profile-avatar">K</span><span><strong>Kreator</strong><small>Admin workspace</small></span><span className="online-dot" /></div>
         </div>
       </aside>
 
       <main className="main-content">
         <header className="topbar">
-          <div className="breadcrumb"><span>Workspace</span><span className="crumb-slash">/</span><strong>{active.label}</strong></div>
-          <div className="topbar-actions"><span className="today-label">{formatDate(dateKey(new Date()), { weekday: "short", day: "numeric", month: "short" })}</span><span className="top-avatar">K</span></div>
+          <div className="breadcrumb"><span>{workspaceName}</span><span className="crumb-slash">/</span><strong>{active.label}</strong></div>
+          <div className="topbar-actions"><span className="today-label">{formatDate(dateKey(new Date()), { weekday: "short", day: "numeric", month: "short" })}</span><span className="top-avatar">{workspaceInitial}</span></div>
         </header>
         <div className="page-wrap">
           {error && <div className="alert alert-error" role="alert"><span>{error}</span><button type="button"           onClick={() => { setError(""); void loadData(); }}>Coba lagi</button></div>}
@@ -414,8 +428,8 @@ export default function Workspace({ page }: { page: Page }) {
           )}
           {page === "settings" && (
             <SettingsPage
-              connectedAccounts={connectedAccounts}
-              toggleAccount={accountToggle}
+              key={settingsSnapshot}
+              settings={settings}
               databaseConnected={!loading && !error}
               onSave={saveSettings}
             />
@@ -490,7 +504,7 @@ function ReportsPage(props: {
           <div className="chart-area">
             <div className="chart-y-labels"><span>100</span><span>75</span><span>50</span><span>25</span><span>0</span></div>
             <div className="chart-bars" role="img" aria-label="Jumlah laporan konten per platform">
-              {platformCounts.map((item, index) => <div className="chart-column" key={item.name}><div className={`chart-bar bar-${index}`} style={{ height: `${Math.max(8, item.count / maxPlatformCount * 100)}%` }}><span>{item.count}</span></div><small>{item.name}</small></div>)}
+                {platformCounts.map((item, index) => <div className="chart-column" key={item.name}><div className={`chart-bar bar-${index}`} style={{ height: `${Math.max(8, item.count / maxPlatformCount * 100)}%` }}><span>{item.count}</span></div><small className="chart-platform-label"><PlatformIcon platform={item.name} />{item.name}</small></div>)}
               <div className="chart-grid-lines"><i /><i /><i /><i /><i /></div>
             </div>
           </div>
@@ -498,7 +512,7 @@ function ReportsPage(props: {
         </section>
         <section className="panel insight-panel">
           <div className="panel-heading"><div><p className="eyebrow">KOMPOSISI</p><h2>Platform aktif</h2></div><span className="sparkle-small">✳</span></div>
-          <div className="platform-list">{platformCounts.map((item, index) => <div className="platform-row" key={item.name}><span className={`platform-dot dot-${index}`} /><span className="platform-row-name">{item.name}</span><div className="mini-track"><i style={{ width: `${item.count ? Math.max(5, item.count / Math.max(props.allReports.length, 1) * 100) : 0}%` }} /></div><strong>{item.count}</strong></div>)}</div>
+          <div className="platform-list">{platformCounts.map((item) => <div className="platform-row" key={item.name}><span className={`platform-symbol ${platformClass(item.name)}`}><PlatformIcon platform={item.name} /></span><span className="platform-row-name">{item.name}</span><div className="mini-track"><i style={{ width: `${item.count ? Math.max(5, item.count / Math.max(props.allReports.length, 1) * 100) : 0}%` }} /></div><strong>{item.count}</strong></div>)}</div>
           <div className="insight-note"><span>↗</span><p><strong>{props.allReports.length ? "Konsistensi adalah kunci." : "Mulai catat performa."}</strong><br />{props.allReports.length ? "Terus publikasikan dan ukur hasil kontenmu." : "Tambahkan laporan pertama untuk melihat ringkasan."}</p></div>
         </section>
       </div>
@@ -513,8 +527,8 @@ function ReportsPage(props: {
         {props.reports.length === 0 ? <EmptyState title="Belum ada laporan" description="Tambahkan laporan secara manual atau sinkronkan dari kalender dan papan ide." /> : (
           <div className="table-scroll"><table className="data-table"><thead><tr><th>Konten</th><th>Platform</th><th>Tanggal</th><th>Followers</th><th>Tayangan</th><th>Jangkauan</th><th>Engagement</th><th><span className="sr-only">Aksi</span></th></tr></thead><tbody>
             {props.reports.map((report) => <tr key={report.id}>
-              <td><div className="content-cell"><span className={`platform-avatar ${platformClass(report.platform)}`}>{platformLabel(report.platform).slice(0, 1)}</span><span><strong>{report.title}</strong><small>{report.tag || "Konten"} · {report.description || "—"}</small></span></div></td>
-              <td><span className={platformClass(report.platform)}>{platformLabel(report.platform)}</span></td><td>{formatDate(report.date)}</td><td>{formatNumber(report.followers)}</td><td>{formatNumber(report.tayangan)}</td><td>{formatNumber(report.jangkauan)}</td><td><span className="engagement-value">{report.engagement || "—"}</span></td>
+              <td><div className="content-cell"><span className={`platform-avatar ${platformClass(report.platform)}`}><PlatformIcon platform={platformLabel(report.platform)} /></span><span><strong>{report.title}</strong><small>{report.tag || "Konten"} · {report.description || "—"}</small></span></div></td>
+              <td><span className={platformClass(report.platform)}><PlatformIcon platform={platformLabel(report.platform)} />{platformLabel(report.platform)}</span></td><td>{formatDate(report.date)}</td><td>{formatNumber(report.followers)}</td><td>{formatNumber(report.tayangan)}</td><td>{formatNumber(report.jangkauan)}</td><td><span className="engagement-value">{report.engagement || "—"}</span></td>
               <td><div className="row-actions"><button title="Edit laporan" type="button" onClick={() => props.openModal(report)}><Icon name="edit" /></button><button title="Hapus laporan" type="button" onClick={() => props.deleteItem(report)}><Icon name="trash" /></button></div></td>
             </tr>)}
           </tbody></table></div>
@@ -522,7 +536,7 @@ function ReportsPage(props: {
       </section>
       <div className="bottom-grid">
         <section className="panel bottom-panel"><div className="panel-heading"><div><p className="eyebrow">LANGKAH BERIKUTNYA</p><h2>Yang akan tayang</h2></div><Link className="text-button" href="/content-planner">Buka planner <Icon name="arrow" /></Link></div>
-          {props.schedules.length === 0 ? <p className="muted-copy">Belum ada jadwal publikasi.</p> : props.schedules.slice(0, 3).map((schedule) => <div className="compact-row" key={schedule.id}><span className={`platform-avatar ${platformClass(schedule.platform)}`}>{platformLabel(schedule.platform).slice(0, 1)}</span><span className="compact-title"><strong>{schedule.title}</strong><small>{formatDate(schedule.date)} · {schedule.time}</small></span><span className={`status-badge status-${schedule.status}`}>{schedule.status === "scheduled" ? "Terjadwal" : schedule.status === "published" ? "Terbit" : "Draft"}</span></div>)}
+          {props.schedules.length === 0 ? <p className="muted-copy">Belum ada jadwal publikasi.</p> : props.schedules.slice(0, 3).map((schedule) => <div className="compact-row" key={schedule.id}><span className={`platform-avatar ${platformClass(schedule.platform)}`}><PlatformIcon platform={platformLabel(schedule.platform)} /></span><span className="compact-title"><strong>{schedule.title}</strong><small>{formatDate(schedule.date)} · {schedule.time}</small></span><span className={`status-badge status-${schedule.status}`}>{schedule.status === "scheduled" ? "Terjadwal" : schedule.status === "published" ? "Terbit" : "Draft"}</span></div>)}
         </section>
         <section className="panel bottom-panel idea-callout"><span className="callout-graphic">✳</span><p className="eyebrow">KUMPULKAN INSPIRASI</p><h2>Punya ide baru?</h2><p>Simpan ide sebelum terlupa, lalu wujudkan jadi konten berikutnya.</p><Link className="button button-dark" href="/ide-konten">Buka papan ide <Icon name="arrow" /></Link></section>
       </div>
@@ -599,7 +613,7 @@ function PlannerPage(props: {
 }
 
 function ScheduleRow({ item, edit, remove, publish, sync }: { item: RecordItem; edit: () => void; remove: () => void; publish: () => void; sync: () => void }) {
-  return <div className="schedule-row"><span className={`platform-avatar ${platformClass(item.platform)}`}>{platformLabel(item.platform).slice(0, 1)}</span><span className="schedule-row-main"><strong>{item.title}</strong><small>{formatDate(item.date)} · {item.time} · {platformLabel(item.platform)}</small></span><span className={`status-badge status-${item.status}`}>{item.status === "scheduled" ? "Terjadwal" : item.status === "published" ? "Terbit" : "Draft"}</span><div className="schedule-row-actions"><button type="button" onClick={edit} title="Edit jadwal"><Icon name="edit" /></button>{item.status === "scheduled" && <button type="button" onClick={publish} title="Tandai sudah terbit">Terbit</button>}<button type="button" onClick={sync} title="Sinkronkan ke laporan">Laporan</button><button type="button" onClick={remove} title="Hapus jadwal"><Icon name="trash" /></button></div></div>;
+  return <div className="schedule-row"><span className={`platform-avatar ${platformClass(item.platform)}`}><PlatformIcon platform={platformLabel(item.platform)} /></span><span className="schedule-row-main"><strong>{item.title}</strong><small>{formatDate(item.date)} · {item.time} · {platformLabel(item.platform)}</small></span><span className={`status-badge status-${item.status}`}>{item.status === "scheduled" ? "Terjadwal" : item.status === "published" ? "Terbit" : "Draft"}</span><div className="schedule-row-actions"><button type="button" onClick={edit} title="Edit jadwal"><Icon name="edit" /></button>{item.status === "scheduled" && <button type="button" onClick={publish} title="Tandai sudah terbit">Terbit</button>}<button type="button" onClick={sync} title="Sinkronkan ke laporan">Laporan</button><button type="button" onClick={remove} title="Hapus jadwal"><Icon name="trash" /></button></div></div>;
 }
 
 function IdeasPage(props: {
@@ -620,7 +634,7 @@ function IdeasPage(props: {
         return <section className={`kanban-column column-${column.color}`} key={column.id}>
           <div className="kanban-column-heading"><span className={`column-dot dot-${column.color}`} /><h2>{column.label}</h2><span className="count-pill">{items.length}</span><button type="button" title={`Tambah di ${column.label}`} onClick={() => props.openModal(undefined, column.id)}>+</button></div>
           <div className="idea-stack">{items.length === 0 ? <button className="empty-column" type="button" onClick={() => props.openModal(undefined, column.id)}>Belum ada ide di sini <span>+ Tambahkan</span></button> : items.map((idea) => <article className="idea-card" key={idea.id}>
-            <div className="idea-card-top"><span className={platformClass(idea.platform)}>{platformLabel(idea.platform)}</span><button type="button" className="idea-edit" onClick={() => props.openModal(idea)} aria-label="Edit ide"><Icon name="edit" /></button></div>
+            <div className="idea-card-top"><span className={platformClass(idea.platform)}><PlatformIcon platform={platformLabel(idea.platform)} />{platformLabel(idea.platform)}</span><button type="button" className="idea-edit" onClick={() => props.openModal(idea)} aria-label="Edit ide"><Icon name="edit" /></button></div>
             <h3>{idea.title}</h3><p>{idea.description || "Tambahkan catatan untuk mengembangkan ide ini."}</p>
             <div className="idea-card-meta"><span>{idea.category || "General"}</span>{idea.scheduled_note && <span><Icon name="calendar" /> Terjadwal</span>}</div>
             <div className="idea-card-actions">
@@ -638,30 +652,18 @@ function IdeasPage(props: {
   );
 }
 
-function SettingsPage(props: { connectedAccounts: string[]; toggleAccount: (name: string) => void; databaseConnected: boolean; onSave: (event: FormEvent<HTMLFormElement>) => void }) {
-  const settingsSnapshot = useSyncExternalStore(subscribeToSettings, getSettingsSnapshot, () => "{}");
-  const settings = useMemo(() => {
-    try {
-      const saved: unknown = JSON.parse(settingsSnapshot);
-      if (saved && typeof saved === "object" && !Array.isArray(saved)) {
-        return Object.fromEntries(Object.entries(saved).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
-      }
-    } catch {
-      return {};
-    }
-    return {};
-  }, [settingsSnapshot]);
+function SettingsPage(props: { settings: Record<string, string>; databaseConnected: boolean; onSave: (event: FormEvent<HTMLFormElement>) => void }) {
+  const { settings } = props;
   return (
     <>
       <PageHeading eyebrow="SESUAIKAN WORKSPACE" title="Pengaturan" description="Atur preferensi agar ruang kerjamu terasa lebih personal." />
-      <form className="settings-layout" key={settingsSnapshot} onSubmit={props.onSave}>
+      <form className="settings-layout" onSubmit={props.onSave}>
         <div className="settings-main">
-          <section className="panel settings-panel"><div className="settings-panel-heading"><span className="settings-icon">◉</span><div><h2>Profil pengguna</h2><p>Informasi dasar untuk workspace-mu.</p></div></div><div className="settings-fields"><label className="field"><span>Nama lengkap</span><input defaultValue={settings.name || "Kreator Kundrew"} name="name" /></label><label className="field"><span>Email</span><input defaultValue={settings.email || "kreator@example.com"} type="email" name="email" /></label><label className="field"><span>Zona waktu</span><select defaultValue={settings.timezone || "WIB"} name="timezone"><option value="WIB">GMT+7 · WIB</option><option value="WITA">GMT+8 · WITA</option><option value="WIT">GMT+9 · WIT</option></select></label><label className="field"><span>Bahasa</span><select defaultValue={settings.language || "id"} name="language"><option value="id">Bahasa Indonesia</option><option value="en">English</option></select></label></div></section>
-          <section className="panel settings-panel"><div className="settings-panel-heading"><span className="settings-icon settings-icon-pink">◎</span><div><h2>Platform pilihan</h2><p>Tandai platform yang kamu gunakan; koneksi akun langsung belum tersedia.</p></div></div><div className="account-list">{platforms.map((platform) => <div className="account-row" key={platform}><span className={`platform-avatar ${platformClass(platform)}`}>{platform.slice(0, 1)}</span><span><strong>{platform}</strong><small>{props.connectedAccounts.includes(platform) ? "Aktif di workspace ini" : "Belum dipilih"}</small></span><button className={props.connectedAccounts.includes(platform) ? "button button-connected" : "button button-outline"} type="button" onClick={() => props.toggleAccount(platform)}>{props.connectedAccounts.includes(platform) ? "Nonaktifkan" : "Aktifkan"}</button></div>)}</div></section>
-          <section className="panel settings-panel"><div className="settings-panel-heading"><span className="settings-icon settings-icon-blue">◌</span><div><h2>Notifikasi</h2><p>Pilih kabar yang ingin kamu terima.</p></div></div><div className="notification-list">{[["Email mingguan", "Ringkasan performa konten setiap minggu."], ["Pengingat jadwal", "Pengingat sebelum jadwal publikasi."], ["Ringkasan harian", "Ikhtisar aktivitas workspace hari ini."]].map(([title, detail], index) => <label className="notification-row" key={title}><span><strong>{title}</strong><small>{detail}</small></span><input type="checkbox" name={`notification-${index}`} defaultChecked={settings[`notification-${index}`] ? settings[`notification-${index}`] === "true" : index < 2} /></label>)}</div></section>
+          <section className="panel settings-panel"><div className="settings-panel-heading"><span className="settings-icon"><Icon name="spark" /></span><div><h2>Nama workspace</h2><p>Nama ini akan tampil di navigasi dan header seluruh halaman.</p></div></div><div className="settings-fields"><label className="field field-wide"><span>Nama workspace</span><input required maxLength={60} name="workspaceName" defaultValue={settings.workspaceName || "Kundrew Studio"} placeholder="Contoh: Studio Kreatif" /></label></div></section>
+          <section className="panel settings-panel"><div className="settings-panel-heading"><span className="settings-icon settings-icon-pink">◎</span><div><h2>Platform tersedia</h2><p>Pilih salah satu saat menambahkan ide, jadwal, atau laporan.</p></div></div><div className="platform-listing">{platforms.map((platform) => <div className="platform-listing-row" key={platform}><span className={`platform-avatar ${platformClass(platform)}`}><PlatformIcon platform={platform} /></span><span><strong>{platform}</strong><small>Tersedia untuk konten workspace</small></span></div>)}</div></section>
           <div className="settings-save"><button className="button button-primary" type="submit">Simpan perubahan <Icon name="arrow" /></button></div>
         </div>
-        <aside className="settings-side"><div className="settings-aside-art">✳</div><p className="eyebrow">RUANG KREATIFMU</p><h2>Dirancang untuk ide yang terus bergerak.</h2><p>Pengaturan akun dan notifikasi disimpan di browser ini. Data laporan, jadwal, dan ide tersimpan di database workspace.</p><span className={`storage-status ${props.databaseConnected ? "" : "storage-error"}`}><i /> {props.databaseConnected ? "Database terhubung" : "Database belum terhubung"}</span></aside>
+        <aside className="settings-side"><div className="settings-aside-art">✳</div><p className="eyebrow">RUANG KREATIFMU</p><h2>Dirancang untuk ide yang terus bergerak.</h2><p>Nama workspace disimpan di browser ini. Data laporan, jadwal, dan ide tersimpan di database.</p><span className={`storage-status ${props.databaseConnected ? "" : "storage-error"}`}><i /> {props.databaseConnected ? "Database terhubung" : "Database belum terhubung"}</span></aside>
       </form>
     </>
   );

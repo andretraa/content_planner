@@ -19,7 +19,7 @@ npm install
 Copy-Item .env.example .env.local
 ```
 
-Isi `DB_URL` di `.env.local` menggunakan connection string **Session pooler** Supabase. Jangan commit atau membagikan kredensial database. Jalankan SQL di [`database/schema.next.sql`](./database/schema.next.sql) sekali jika database belum mempunyai tabel aplikasi. Bila tabel `reports`, `schedules`, dan `ideas` sudah tersedia, aplikasi dapat langsung menggunakan tabel tersebut.
+Isi `.env.local` menggunakan detail koneksi **Session pooler** Supabase (`DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_SSLMODE=require`, dan `DB_SCHEMA=public`), atau gunakan connection string `DB_URL`. Jangan commit atau membagikan kredensial database. Jalankan SQL di [`database/schema.next.sql`](./database/schema.next.sql) sekali jika database belum mempunyai tabel aplikasi. Bila tabel `reports`, `schedules`, dan `ideas` sudah tersedia, aplikasi dapat langsung menggunakan tabel tersebut.
 
 Database SQLite Laravel lama, bila ada, dibiarkan utuh tetapi tidak dibaca atau diimpor otomatis oleh Next.js. Pastikan data yang ingin dipakai sudah ada di database Supabase sebelum beralih.
 
@@ -36,13 +36,17 @@ npm run build
 
 ## Deploy ke Vercel
 
-Hubungkan repository ke Vercel dengan root directory repository dan framework preset **Next.js**. Tambahkan variabel lingkungan berikut di Vercel untuk Production dan Preview:
+Pastikan project Vercel terhubung ke repository GitHub ini, root directory mengarah ke root repository, dan framework preset **Next.js**. Di **Project Settings → Environment Variables**, tambahkan variabel berikut untuk **Production** dan, jika digunakan, **Preview**:
 
-- `DB_URL` — connection string PostgreSQL Supabase Session pooler.
+- `DB_HOST` — host **Session pooler** dari Supabase.
+- `DB_PORT=5432`
+- `DB_DATABASE=postgres`
+- `DB_USERNAME` — user **Session pooler** dari Supabase.
+- `DB_PASSWORD` — password database Supabase. Masukkan hanya langsung di dashboard Vercel, jangan di commit atau dibagikan lewat chat.
 - `DB_SSLMODE=require`
 - `DB_SCHEMA=public`
 
-Atau gunakan variabel terpisah `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, dan `DB_PASSWORD`. Terapkan [`database/schema.next.sql`](./database/schema.next.sql) sekali ke database yang akan digunakan, lalu deploy. Jika Supabase yang sama sudah berisi tabel aplikasi, data laporan, jadwal, dan ide tetap berada di sana tanpa proses salin ulang.
+Sebagai alternatif, atur `DB_URL` memakai connection string **Session pooler** lengkap. Terapkan [`database/schema.next.sql`](./database/schema.next.sql) sekali ke database yang akan digunakan, lalu buat deployment baru atau **Redeploy** deployment terbaru agar variabel lingkungan diterapkan. Tabel untuk Supabase yang digunakan aplikasi ini sudah disiapkan; data laporan, jadwal, dan ide tersimpan di Supabase.
 
 ## Route
 
