@@ -37,11 +37,25 @@ php artisan serve
 
 Buka browser dan akses `http://localhost:8000`
 
+## Deploy ke Vercel
+
+Project Laravel ini menggunakan `Dockerfile.vercel` dan FrankenPHP agar Vercel menjalankan PHP, bukan menyajikan `public/index.php` sebagai file statis.
+
+1. Pastikan root directory project Vercel menunjuk ke root repository dan pilih framework preset **Container** pada pengaturan Build & Development.
+2. Tambahkan environment variables di Vercel:
+   - `APP_KEY`: hasilkan dengan `php artisan key:generate --show` secara lokal, lalu simpan nilainya hanya di pengaturan Vercel.
+   - `APP_ENV=production`
+   - `APP_DEBUG=false`
+   - `APP_URL=https://contentplanner-ashy.vercel.app`
+3. Deploy ulang dari branch yang terhubung.
+
+File `.env` lokal, database SQLite, data JSON, cache, dan log tidak disalin ke Docker image. Data aplikasi saat ini disimpan di file JSON lokal, sehingga perubahan yang dibuat saat aplikasi berjalan di Vercel tidak memiliki penyimpanan persisten dan dapat hilang saat instance diganti. Gunakan database atau object storage eksternal jika data harus tetap tersimpan di production.
+
 ## Tech Stack
 
 - **Backend**: Laravel 11
 - **Frontend**: Tailwind CSS (CDN), Chart.js
-- **Font**: Inter (Google Fonts)
+- **Font**: Poppins (Google Fonts)
 
 ## Struktur Halaman
 
@@ -52,4 +66,3 @@ Buka browser dan akses `http://localhost:8000`
 | `/content-planner` | Content Calendar |
 | `/ide-konten` | Content Ideation Board |
 | `/pengaturan` | Settings |
-
