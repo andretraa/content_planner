@@ -14,7 +14,9 @@ RUN composer install --no-dev --no-interaction --no-progress --prefer-dist --opt
 
 FROM base AS runtime
 
-ENV PORT=80
+ENV PORT=80 \
+    APP_ENV=production \
+    APP_DEBUG=false
 
 COPY --from=dependencies /app/vendor ./vendor
 COPY Caddyfile /etc/caddy/Caddyfile
@@ -27,6 +29,7 @@ RUN mkdir -p \
         storage/framework/views \
         storage/logs \
         bootstrap/cache \
+    && chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
 
 CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]
