@@ -56,7 +56,7 @@ Jalankan `php artisan migrate --force` satu kali setelah mengatur koneksi. Migra
 
 ## Deploy ke Vercel
 
-Project Laravel ini menggunakan `Dockerfile.vercel` dan FrankenPHP agar Vercel menjalankan PHP, bukan menyajikan `public/index.php` sebagai file statis.
+Project Laravel ini menggunakan `vercel.json`, `Dockerfile.vercel`, dan FrankenPHP agar Vercel mengirim semua rute ke container PHP, bukan menyajikan `public/index.php` sebagai file statis.
 
 1. Pastikan root directory project Vercel menunjuk ke root repository dan pilih framework preset **Container** pada pengaturan Build & Development.
 2. Tambahkan environment variables di Vercel:
