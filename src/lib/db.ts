@@ -9,8 +9,13 @@ declare global {
 export function getPool(): Pool {
   if (globalThis.contentPlannerPool) return globalThis.contentPlannerPool;
 
-  const connectionString = process.env.DB_URL ?? process.env.DATABASE_URL;
-  const host = process.env.DB_HOST;
+  const connectionString =
+    process.env.DB_URL ??
+    process.env.DATABASE_URL ??
+    process.env.POSTGRES_URL ??
+    process.env.POSTGRES_PRISMA_URL ??
+    process.env.POSTGRES_URL_NON_POOLING;
+  const host = process.env.DB_HOST ?? process.env.POSTGRES_HOST;
   if (!connectionString && !host) {
     throw new DatabaseConfigurationError();
   }
@@ -21,10 +26,10 @@ export function getPool(): Pool {
       ? { connectionString }
       : {
           host,
-          port: Number(process.env.DB_PORT ?? 5432),
-          database: process.env.DB_DATABASE ?? "postgres",
-          user: process.env.DB_USERNAME,
-          password: process.env.DB_PASSWORD,
+          port: Number(process.env.DB_PORT ?? process.env.POSTGRES_PORT ?? 5432),
+          database: process.env.DB_DATABASE ?? process.env.POSTGRES_DATABASE ?? "postgres",
+          user: process.env.DB_USERNAME ?? process.env.POSTGRES_USER,
+          password: process.env.DB_PASSWORD ?? process.env.POSTGRES_PASSWORD,
         }),
     ...(sslMode === "require" ? { ssl: { rejectUnauthorized: false } } : {}),
     max: 3,

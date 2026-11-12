@@ -8,11 +8,11 @@ type RecordItem = Record<string, string | number | null | undefined> & { id: str
 type IdeaColumn = "ideas" | "in_progress" | "ready_to_shoot" | "completed";
 type ModalState = { type: "report" | "schedule" | "idea"; item?: RecordItem; column?: IdeaColumn; date?: string } | null;
 
-const navigation: { id: Page; label: string; href: string; number: string; hint: string }[] = [
-  { id: "reports", label: "Laporan Sosmed", href: "/laporan-sosmed", number: "01", hint: "Analitik & performa" },
-  { id: "planner", label: "Content Planner", href: "/content-planner", number: "02", hint: "Kalender publikasi" },
-  { id: "ideas", label: "Ide Konten", href: "/ide-konten", number: "03", hint: "Papan inspirasi" },
-  { id: "settings", label: "Pengaturan", href: "/pengaturan", number: "04", hint: "Preferensi workspace" },
+const navigation: { id: Page; label: string; href: string; hint: string }[] = [
+  { id: "reports", label: "Laporan Sosmed", href: "/laporan-sosmed", hint: "Analitik & performa" },
+  { id: "planner", label: "Content Planner", href: "/content-planner", hint: "Kalender publikasi" },
+  { id: "ideas", label: "Ide Konten", href: "/ide-konten", hint: "Papan inspirasi" },
+  { id: "settings", label: "Pengaturan", href: "/pengaturan", hint: "Preferensi workspace" },
 ];
 
 const platforms = ["Instagram", "TikTok", "Threads", "YouTube"];
@@ -141,6 +141,14 @@ function Icon({ name }: { name: string }) {
     trash: "M4 7h16M10 11v6m4-6v6M6 7l1 14h10l1-14M9 7V4h6v3",
     close: "m6 6 12 12M18 6 6 18",
     clock: "M12 8v4l2.5 1.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+    reports: "M4 19V5m0 14h16M8 15v-4m4 4V7m4 8v-6",
+    planner: "M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13H4V6a1 1 0 0 1 1-1Z",
+    ideas: "M9 18h6m-5 3h4m-5.3-6.1A6 6 0 1 1 15.3 14.9c-.8.6-1.3 1.4-1.3 2.1h-4c0-.7-.5-1.5-1.3-2.1Z",
+    settings: "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm0-5v2m0 13v2m9-8h-2m-14 0H3m15.36-6.36-1.42 1.42M7.06 16.94l-1.42 1.42m12.72 0-1.42-1.42M7.06 7.06 5.64 5.64",
+    layers: "m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5",
+    users: "M16 20v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V20M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.5-6.8a3.5 3.5 0 0 1 0 6.6M17 14.5h.5a4 4 0 0 1 4 4V20",
+    eye: "M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Zm9.5-3.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z",
+    heart: "M20.8 8.8c0 5.2-8.8 10.1-8.8 10.1S3.2 14 3.2 8.8A4.3 4.3 0 0 1 12 6.9a4.3 4.3 0 0 1 8.8 1.9Z",
   };
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="icon">
@@ -353,7 +361,7 @@ export default function Workspace({ page }: { page: Page }) {
         <nav className="side-nav" aria-label="Navigasi utama">
           {navigation.map((item) => (
             <Link key={item.id} href={item.href} className={`nav-link ${page === item.id ? "active" : ""}`}>
-              <span className="nav-number">{item.number}</span>
+              <span className="nav-icon"><Icon name={item.id} /></span>
               <span className="nav-copy"><strong>{item.label}</strong><small>{item.hint}</small></span>
               {page === item.id && <span className="nav-indicator" />}
             </Link>
@@ -489,12 +497,12 @@ function ReportsPage(props: {
       <PageHeading eyebrow="RINGKASAN PERFORMA" title="Laporan Sosmed" description="Pahami performa konten dan temukan hal yang paling disukai audiens." action={
         <div className="heading-actions"><button className="button button-quiet" type="button" onClick={props.exportCsv}><Icon name="download" /> Ekspor CSV</button><button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Tambah laporan</button></div>
       } />
-      <div className="welcome-strip"><div className="welcome-orb">✳</div><div><strong>Setiap angka punya cerita.</strong><p>Gunakan ringkasan ini untuk melihat konten mana yang membawa dampak paling besar.</p></div><span className="strip-decoration">INSIGHT / 01</span></div>
+      <div className="welcome-strip"><div className="welcome-orb"><Icon name="spark" /></div><div><strong>Setiap angka punya cerita.</strong><p>Gunakan ringkasan ini untuk melihat konten mana yang membawa dampak paling besar.</p></div><span className="strip-decoration">INSIGHT / 01</span></div>
       <div className="metric-grid">
-        <MetricCard label="Total konten" value={formatNumber(props.allReports.length)} detail="laporan tersimpan" tone="purple" icon="▤" />
-        <MetricCard label="Total jangkauan" value={formatNumber(props.totalReach)} detail="akun terjangkau" tone="blue" icon="◉" />
-        <MetricCard label="Total tayangan" value={formatNumber(props.totalViews)} detail="tayangan tercatat" tone="peach" icon="↗" />
-        <MetricCard label="Rata-rata engagement" value={`${props.averageEngagement.toFixed(1)}%`} detail="interaksi audiens" tone="mint" icon="✳" />
+        <MetricCard label="Total konten" value={formatNumber(props.allReports.length)} detail="laporan tersimpan" tone="purple" icon="layers" />
+        <MetricCard label="Total jangkauan" value={formatNumber(props.totalReach)} detail="akun terjangkau" tone="blue" icon="users" />
+        <MetricCard label="Total tayangan" value={formatNumber(props.totalViews)} detail="tayangan tercatat" tone="peach" icon="eye" />
+        <MetricCard label="Rata-rata engagement" value={`${props.averageEngagement.toFixed(1)}%`} detail="interaksi audiens" tone="mint" icon="heart" />
       </div>
       <div className="content-grid analytics-grid">
         <section className="panel trend-panel">
@@ -545,7 +553,7 @@ function ReportsPage(props: {
 }
 
 function MetricCard({ label, value, detail, tone, icon }: { label: string; value: string; detail: string; tone: string; icon: string }) {
-  return <article className={`metric-card tone-${tone}`}><div className="metric-top"><span>{label}</span><span className="metric-icon">{icon}</span></div><strong className="metric-value">{value}</strong><span className="metric-detail">{detail}</span><span className="metric-decoration" /></article>;
+  return <article className={`metric-card tone-${tone}`}><div className="metric-top"><span>{label}</span><span className="metric-icon"><Icon name={icon} /></span></div><strong className="metric-value">{value}</strong><span className="metric-detail">{detail}</span><span className="metric-decoration" /></article>;
 }
 
 function PlannerPage(props: {
@@ -628,7 +636,7 @@ function IdeasPage(props: {
   return (
     <>
       <PageHeading eyebrow="TANGKAP SEMUA INSPIRASI" title="Ide Konten" description="Papan kecil untuk ide-ide besar. Kembangkan, jadwalkan, dan wujudkan." action={<button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Tambah ide</button>} />
-      <div className="ideas-banner"><div className="ideas-banner-symbol">✳</div><div><strong>Ide terbaik sering datang tiba-tiba.</strong><p>Simpan di sini, kamu bisa mengembangkannya kapan saja.</p></div><span className="banner-count"><strong>{props.ideas.length}</strong><small>ide tersimpan</small></span></div>
+      <div className="ideas-banner"><div className="ideas-banner-symbol"><Icon name="spark" /></div><div><strong>Ide terbaik sering datang tiba-tiba.</strong><p>Simpan di sini, kamu bisa mengembangkannya kapan saja.</p></div><span className="banner-count"><strong>{props.ideas.length}</strong><small>ide tersimpan</small></span></div>
       <div className="kanban-board">{columns.map((column) => {
         const items = props.ideas.filter((idea) => idea.column === column.id);
         return <section className={`kanban-column column-${column.color}`} key={column.id}>

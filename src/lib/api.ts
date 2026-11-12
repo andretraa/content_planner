@@ -9,7 +9,7 @@ export class InputError extends Error {
 
 export class DatabaseConfigurationError extends Error {
   constructor() {
-    super("Konfigurasi Supabase belum ditemukan. Di lokal, isi DB_HOST atau DB_URL di .env.local. Di Vercel, tambahkan variabel database di Project Settings → Environment Variables lalu redeploy.");
+    super("Konfigurasi Supabase belum ditemukan. Di lokal, isi DB_HOST atau DB_URL di .env.local. Di Vercel, tambahkan POSTGRES_URL atau POSTGRES_HOST beserta variabel database di Project Settings → Environment Variables lalu redeploy.");
     this.name = "DatabaseConfigurationError";
   }
 }
