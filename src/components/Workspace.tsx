@@ -1,12 +1,18 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 type Page = "reports" | "planner" | "ideas" | "settings";
 type RecordItem = Record<string, string | number | null | undefined> & { id: string | number };
 type IdeaColumn = "ideas" | "in_progress" | "ready_to_shoot" | "completed";
 type ModalState = { type: "report" | "schedule" | "idea"; item?: RecordItem; column?: IdeaColumn; date?: string } | null;
+type Collection = "reports" | "schedules" | "ideas";
+type ConfirmationState =
+  | { type: "save"; collection: Collection; id: string | number; payload: Record<string, FormDataEntryValue>; title: string }
+  | { type: "delete"; collection: Collection; item: RecordItem }
+  | null;
 
 const navigation: { id: Page; label: string; href: string; hint: string }[] = [
   { id: "reports", label: "Laporan Sosmed", href: "/laporan-sosmed", hint: "Analitik & performa" },
@@ -16,6 +22,12 @@ const navigation: { id: Page; label: string; href: string; hint: string }[] = [
 ];
 
 const platforms = ["Instagram", "TikTok", "Threads", "YouTube"];
+const platformLabels: Record<string, string> = {
+  instagram: "Instagram",
+  tiktok: "TikTok",
+  threads: "Threads",
+  youtube: "YouTube",
+};
 const columns: { id: IdeaColumn; label: string; color: string }[] = [
   { id: "ideas", label: "Ide baru", color: "lavender" },
   { id: "in_progress", label: "Sedang dibuat", color: "blue" },
@@ -46,8 +58,8 @@ const emptySchedule = {
 const emptyIdea = { title: "", description: "", platform: "Instagram", category: "", column: "ideas" };
 
 function platformLabel(value: unknown) {
-  const text = String(value ?? "Instagram");
-  return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+  const normalized = String(value ?? "Instagram").trim().toLowerCase();
+  return platformLabels[normalized] ?? normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
 function formatNumber(value: unknown) {
@@ -65,6 +77,32 @@ function formatDate(value: unknown, options?: Intl.DateTimeFormatOptions) {
 function dateKey(date: Date) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 10);
+}
+
+async function readApiResponse(response: Response, fallback: string): Promise<Record<string, unknown>> {
+  const body = await response.text();
+  let result: unknown;
+
+  if (body) {
+    try {
+      result = JSON.parse(body);
+    } catch {
+      throw new Error(`Server mengirim respons yang tidak valid (HTTP ${response.status}). Periksa Runtime Logs di Vercel.`);
+    }
+  } else {
+    throw new Error(`Server tidak mengirim respons (HTTP ${response.status}). Periksa Runtime Logs di Vercel.`);
+  }
+
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error(`Format respons server tidak valid (HTTP ${response.status}). Periksa Runtime Logs di Vercel.`);
+  }
+
+  const payload = result as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(typeof payload.message === "string" ? payload.message : `${fallback} (HTTP ${response.status}).`);
+  }
+
+  return payload;
 }
 
 function platformClass(value: unknown) {
@@ -93,6 +131,53 @@ function parseSettings(snapshot: string): Record<string, string> {
     return {};
   }
   return {};
+}
+
+function getProfileImage(value?: string) {
+  return value?.startsWith("data:image/jpeg;base64,") ? value : "";
+}
+
+function resizeProfileImage(file: File): Promise<string> {
+  if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type)) {
+    return Promise.reject(new Error("Gunakan foto berformat JPEG, PNG, WebP, atau GIF."));
+  }
+  if (file.size > 10 * 1024 * 1024) return Promise.reject(new Error("Ukuran foto maksimal 10 MB."));
+
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new window.Image();
+    image.onload = () => {
+      try {
+        const scale = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Foto tidak dapat diproses di browser ini.");
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+        if (dataUrl.length > 1_500_000) throw new Error("Ukuran foto terlalu besar setelah diproses. Pilih foto lain.");
+        resolve(dataUrl);
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error("Foto tidak dapat diproses."));
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Foto tidak dapat dibaca. Pilih file gambar lain."));
+    };
+    image.src = objectUrl;
+  });
+}
+
+function WorkspaceAvatar({ image, initial, className }: { image: string; initial: string; className: string }) {
+  return (
+    <span className={className}>
+      {image ? <Image className="avatar-photo" src={image} alt="" width={48} height={48} unoptimized /> : initial}
+    </span>
+  );
 }
 
 function PlatformIcon({ platform }: { platform: string }) {
@@ -166,6 +251,7 @@ export default function Workspace({ page }: { page: Page }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [modal, setModal] = useState<ModalState>(null);
+  const [confirmation, setConfirmation] = useState<ConfirmationState>(null);
   const [query, setQuery] = useState("");
   const [platformFilter, setPlatformFilter] = useState("Semua platform");
   const [period, setPeriod] = useState("mingguan");
@@ -175,14 +261,15 @@ export default function Workspace({ page }: { page: Page }) {
   const settings = useMemo(() => parseSettings(settingsSnapshot), [settingsSnapshot]);
   const workspaceName = settings.workspaceName?.trim() || "Kundrew Studio";
   const workspaceInitial = workspaceName.charAt(0).toUpperCase() || "K";
+  const profileImage = getProfileImage(settings.profileImage);
 
   const loadData = useCallback(async () => {
     try {
       const responses = await Promise.all(["reports", "schedules", "ideas"].map((item) => fetch(`/api/${item}`, { cache: "no-store" })));
       const payloads = await Promise.all(
         responses.map(async (response) => {
-          const json = await response.json();
-          if (!response.ok) throw new Error(json.message ?? "Data tidak dapat dimuat.");
+          const json = await readApiResponse(response, "Data tidak dapat dimuat.");
+          if (!Array.isArray(json.data)) throw new Error("Format data dari server tidak valid.");
           return json.data as RecordItem[];
         }),
       );
@@ -211,23 +298,29 @@ export default function Workspace({ page }: { page: Page }) {
       method,
       ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
     });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.message ?? "Permintaan gagal.");
+    const result = await readApiResponse(response, "Permintaan gagal.");
     return result;
+  };
+
+  const addScheduleToReports = async (scheduleId: string | number) => {
+    await callApi(`/api/reports/from-schedule/${scheduleId}`, "POST", {});
   };
 
   const exportCsv = () => {
     void runAction(async () => {
-      const response = await fetch("/api/reports/export");
+      const params = new URLSearchParams();
+      if (platformFilter !== "Semua platform") params.set("platform", platformFilter);
+      const queryString = params.toString();
+      const response = await fetch(`/api/reports/export${queryString ? `?${queryString}` : ""}`);
       if (!response.ok) {
-        const result = await response.json();
-        throw new Error(result.message ?? "Laporan tidak dapat diekspor.");
+        await readApiResponse(response, "Laporan tidak dapat diekspor.");
       }
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = objectUrl;
-      link.download = `laporan-sosmed-${new Date().toISOString().slice(0, 10)}.csv`;
+      const platformSuffix = platformFilter === "Semua platform" ? "" : `-${platformFilter.toLowerCase()}`;
+      link.download = `laporan-sosmed${platformSuffix}-${new Date().toISOString().slice(0, 10)}.csv`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -252,39 +345,74 @@ export default function Workspace({ page }: { page: Page }) {
     if (!modal) return;
     const form = new FormData(event.currentTarget);
     const fields = Object.fromEntries(form.entries());
+    const collection = modal.type === "report" ? "reports" : modal.type === "schedule" ? "schedules" : "ideas";
+    const payload = {
+      ...fields,
+      ...(modal.type === "idea" ? { column: fields.column || modal.column || "ideas" } : {}),
+    };
+
+    if (modal.item) {
+      setConfirmation({ type: "save", collection, id: modal.item.id, payload, title: String(modal.item.title ?? "") });
+      return;
+    }
+
     await runAction(async () => {
-      const collection = modal.type === "report" ? "reports" : modal.type === "schedule" ? "schedules" : "ideas";
-      const payload = {
-        ...fields,
-        ...(modal.type === "idea" ? { column: fields.column || modal.column || "ideas" } : {}),
-      };
-      await callApi(`/api/${collection}${modal.item ? `/${modal.item.id}` : ""}`, modal.item ? "PUT" : "POST", payload);
+      const result = await callApi(`/api/${collection}`, "POST", payload);
+      if (collection === "schedules" && fields.status === "published") {
+        const created = result.data;
+        if (!created || typeof created !== "object" || Array.isArray(created) || !("id" in created)) {
+          throw new Error("Jadwal berhasil dibuat, tetapi data laporan tidak dapat disiapkan.");
+        }
+        const scheduleId = created.id;
+        if (typeof scheduleId !== "string" && typeof scheduleId !== "number") {
+          throw new Error("Jadwal berhasil dibuat, tetapi ID jadwal tidak valid untuk laporan.");
+        }
+        await addScheduleToReports(scheduleId);
+      }
       await loadData();
       setModal(null);
       setNotice("Perubahan berhasil disimpan.");
     });
   };
 
-  const removeRecord = (resource: string, item: RecordItem) => {
-    if (!window.confirm(`Hapus "${item.title}"? Tindakan ini tidak dapat dibatalkan.`)) return;
-    void runAction(async () => {
-      await callApi(`/api/${resource}/${item.id}`, "DELETE");
+  const removeRecord = (collection: Collection, item: RecordItem) => {
+    setConfirmation({ type: "delete", collection, item });
+  };
+
+  const confirmAction = async () => {
+    if (!confirmation) return;
+    const action = confirmation;
+    await runAction(async () => {
+      if (action.type === "delete") {
+        await callApi(`/api/${action.collection}/${action.item.id}`, "DELETE");
+        await loadData();
+        setNotice("Data berhasil dihapus.");
+        return;
+      }
+
+      await callApi(`/api/${action.collection}/${action.id}`, "PUT", action.payload);
+      if (action.collection === "schedules" && action.payload.status === "published") {
+        await addScheduleToReports(action.id);
+      }
       await loadData();
-      setNotice("Data berhasil dihapus.");
+      setModal(null);
+      setNotice("Perubahan berhasil disimpan.");
     });
+    setConfirmation(null);
   };
 
   const publishSchedule = (schedule: RecordItem) => {
     void runAction(async () => {
+      await addScheduleToReports(schedule.id);
       await callApi(`/api/schedules/${schedule.id}`, "PUT", { ...schedule, status: "published" });
       await loadData();
-      setNotice("Jadwal ditandai sudah dipublikasikan.");
+      setNotice("Jadwal diterbitkan dan otomatis ditambahkan ke laporan.");
     });
   };
 
   const syncSchedule = (schedule: RecordItem) => {
     void runAction(async () => {
-      await callApi(`/api/reports/from-schedule/${schedule.id}`, "POST", {});
+      await addScheduleToReports(schedule.id);
       await loadData();
       setNotice("Jadwal berhasil disinkronkan ke laporan.");
     });
@@ -323,12 +451,15 @@ export default function Workspace({ page }: { page: Page }) {
   }, [period, platformFilter, query, reports]);
 
   const active = navigation.find((item) => item.id === page)!;
-  const totalReach = reports.reduce((sum, report) => sum + (Number.parseFloat(String(report.jangkauan ?? "").replace(/[^\d.-]/g, "")) || 0), 0);
-  const totalViews = reports.reduce((sum, report) => sum + (Number.parseFloat(String(report.tayangan ?? "").replace(/[^\d.-]/g, "")) || 0), 0);
-  const averageEngagement = reports.length
-    ? reports.reduce((sum, report) => sum + (Number.parseFloat(String(report.engagement ?? "").replace(/[^\d.-]/g, "")) || 0), 0) / reports.length
+  const insightReports = platformFilter === "Semua platform"
+    ? reports
+    : reports.filter((report) => platformLabel(report.platform) === platformFilter);
+  const totalFollowers = insightReports.reduce((sum, report) => sum + (Number.parseFloat(String(report.followers ?? "").replace(/[^\d.-]/g, "")) || 0), 0);
+  const totalViews = insightReports.reduce((sum, report) => sum + (Number.parseFloat(String(report.tayangan ?? "").replace(/[^\d.-]/g, "")) || 0), 0);
+  const averageEngagement = insightReports.length
+    ? insightReports.reduce((sum, report) => sum + (Number.parseFloat(String(report.engagement ?? "").replace(/[^\d.-]/g, "")) || 0), 0) / insightReports.length
     : 0;
-  const saveSettings = (event: FormEvent<HTMLFormElement>) => {
+  const saveSettings = (event: FormEvent<HTMLFormElement>, profileImage: string) => {
     event.preventDefault();
     const workspaceName = new FormData(event.currentTarget).get("workspaceName");
     const normalizedName = typeof workspaceName === "string" ? workspaceName.trim() : "";
@@ -336,13 +467,13 @@ export default function Workspace({ page }: { page: Page }) {
       setError("Nama workspace wajib diisi.");
       return;
     }
-    const snapshot = JSON.stringify({ workspaceName: normalizedName });
+    const snapshot = JSON.stringify({ workspaceName: normalizedName, profileImage });
     try {
       window.localStorage.setItem("planning-kundrew-settings", snapshot);
       window.dispatchEvent(new StorageEvent("storage", { key: "planning-kundrew-settings", newValue: snapshot }));
       setNotice("Pengaturan berhasil disimpan di browser ini.");
     } catch {
-      setError("Preferensi tidak dapat disimpan di browser ini.");
+      setError("Preferensi tidak dapat disimpan di browser ini. Coba pilih foto yang lebih kecil.");
     }
   };
 
@@ -351,10 +482,10 @@ export default function Workspace({ page }: { page: Page }) {
       <aside className="sidebar">
         <Link className="brand" href="/">
           <span className="brand-mark"><Icon name="spark" /></span>
-          <span><span className="brand-kicker">PLANNING</span><strong>Kundrew</strong></span>
+          <span><span className="brand-kicker">CONTENT</span><strong>PLANNING</strong></span>
         </Link>
         <div className="workspace-switcher">
-          <span className="workspace-avatar">{workspaceInitial}</span>
+          <WorkspaceAvatar image={profileImage} initial={workspaceInitial} className="workspace-avatar" />
           <span className="workspace-name"><strong>{workspaceName}</strong><small>Workspace pribadi</small></span>
         </div>
         <p className="nav-caption">WORKSPACE</p>
@@ -380,7 +511,7 @@ export default function Workspace({ page }: { page: Page }) {
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumb"><span>{workspaceName}</span><span className="crumb-slash">/</span><strong>{active.label}</strong></div>
-          <div className="topbar-actions"><span className="today-label">{formatDate(dateKey(new Date()), { weekday: "short", day: "numeric", month: "short" })}</span><span className="top-avatar">{workspaceInitial}</span></div>
+          <div className="topbar-actions"><span className="today-label">{formatDate(dateKey(new Date()), { weekday: "short", day: "numeric", month: "short" })}</span><WorkspaceAvatar image={profileImage} initial={workspaceInitial} className="top-avatar" /></div>
         </header>
         <div className="page-wrap">
           {error && <div className="alert alert-error" role="alert"><span>{error}</span><button type="button"           onClick={() => { setError(""); void loadData(); }}>Coba lagi</button></div>}
@@ -391,10 +522,10 @@ export default function Workspace({ page }: { page: Page }) {
           {page === "reports" && (
             <ReportsPage
               reports={filteredReports}
-              allReports={reports}
+              insightReports={insightReports}
               schedules={schedules}
               ideas={ideas}
-              totalReach={totalReach}
+              totalFollowers={totalFollowers}
               totalViews={totalViews}
               averageEngagement={averageEngagement}
               period={period}
@@ -454,6 +585,14 @@ export default function Workspace({ page }: { page: Page }) {
           onSubmit={saveRecord}
         />
       )}
+      {confirmation && (
+        <ConfirmationDialog
+          confirmation={confirmation}
+          busy={busy}
+          onCancel={() => { if (!busy) setConfirmation(null); }}
+          onConfirm={confirmAction}
+        />
+      )}
       {notice && <div className="toast"><span className="toast-check">✓</span>{notice}</div>}
     </div>
   );
@@ -470,10 +609,10 @@ function PageHeading({ eyebrow, title, description, action }: { eyebrow: string;
 
 function ReportsPage(props: {
   reports: RecordItem[];
-  allReports: RecordItem[];
+  insightReports: RecordItem[];
   schedules: RecordItem[];
   ideas: RecordItem[];
-  totalReach: number;
+  totalFollowers: number;
   totalViews: number;
   averageEngagement: number;
   period: string;
@@ -487,9 +626,10 @@ function ReportsPage(props: {
   openModal: (item?: RecordItem) => void;
   deleteItem: (item: RecordItem) => void;
 }) {
-  const platformCounts = platforms.map((platform) => ({
+  const visiblePlatforms = props.platformFilter === "Semua platform" ? platforms : [props.platformFilter];
+  const platformCounts = visiblePlatforms.map((platform) => ({
     name: platform,
-    count: props.allReports.filter((item) => platformLabel(item.platform) === platform).length,
+    count: props.insightReports.filter((item) => platformLabel(item.platform) === platform).length,
   }));
   const maxPlatformCount = Math.max(1, ...platformCounts.map((item) => item.count));
   return (
@@ -499,8 +639,8 @@ function ReportsPage(props: {
       } />
       <div className="welcome-strip"><div className="welcome-orb"><Icon name="spark" /></div><div><strong>Setiap angka punya cerita.</strong><p>Gunakan ringkasan ini untuk melihat konten mana yang membawa dampak paling besar.</p></div><span className="strip-decoration">INSIGHT / 01</span></div>
       <div className="metric-grid">
-        <MetricCard label="Total konten" value={formatNumber(props.allReports.length)} detail="laporan tersimpan" tone="purple" icon="layers" />
-        <MetricCard label="Total jangkauan" value={formatNumber(props.totalReach)} detail="akun terjangkau" tone="blue" icon="users" />
+        <MetricCard label="Total konten" value={formatNumber(props.insightReports.length)} detail="laporan tersimpan" tone="purple" icon="layers" />
+        <MetricCard label="Total followers" value={formatNumber(props.totalFollowers)} detail="followers tercatat" tone="blue" icon="users" />
         <MetricCard label="Total tayangan" value={formatNumber(props.totalViews)} detail="tayangan tercatat" tone="peach" icon="eye" />
         <MetricCard label="Rata-rata engagement" value={`${props.averageEngagement.toFixed(1)}%`} detail="interaksi audiens" tone="mint" icon="heart" />
       </div>
@@ -519,25 +659,27 @@ function ReportsPage(props: {
           <div className="chart-legend"><span><i className="legend-dot violet" />Laporan konten</span><span className="chart-footnote">Distribusi berdasarkan platform</span></div>
         </section>
         <section className="panel insight-panel">
-          <div className="panel-heading"><div><p className="eyebrow">KOMPOSISI</p><h2>Platform aktif</h2></div><span className="sparkle-small">✳</span></div>
-          <div className="platform-list">{platformCounts.map((item) => <div className="platform-row" key={item.name}><span className={`platform-symbol ${platformClass(item.name)}`}><PlatformIcon platform={item.name} /></span><span className="platform-row-name">{item.name}</span><div className="mini-track"><i style={{ width: `${item.count ? Math.max(5, item.count / Math.max(props.allReports.length, 1) * 100) : 0}%` }} /></div><strong>{item.count}</strong></div>)}</div>
-          <div className="insight-note"><span>↗</span><p><strong>{props.allReports.length ? "Konsistensi adalah kunci." : "Mulai catat performa."}</strong><br />{props.allReports.length ? "Terus publikasikan dan ukur hasil kontenmu." : "Tambahkan laporan pertama untuk melihat ringkasan."}</p></div>
+          <div className="panel-heading insight-heading"><div><p className="eyebrow">INSIGHT PER PLATFORM</p><h2>{props.platformFilter === "Semua platform" ? "Performa platform" : `Performa ${props.platformFilter}`}</h2></div>
+            <select className="insight-filter" value={props.platformFilter} onChange={(event) => props.setPlatformFilter(event.target.value)} aria-label="Filter insight berdasarkan platform">
+              <option>Semua platform</option>{platforms.map((platform) => <option key={platform}>{platform}</option>)}
+            </select>
+          </div>
+          <p className="insight-filter-hint">Filter ini juga berlaku untuk performa terbaru.</p>
+          <div className="platform-list">{platformCounts.map((item) => <div className="platform-row" key={item.name}><span className={`platform-symbol ${platformClass(item.name)}`}><PlatformIcon platform={item.name} /></span><span className="platform-row-name">{item.name}</span><div className="mini-track"><i style={{ width: `${item.count ? Math.max(5, item.count / Math.max(props.insightReports.length, 1) * 100) : 0}%` }} /></div><strong>{item.count}</strong></div>)}</div>
+          <div className="insight-note"><span>↗</span><p><strong>{props.insightReports.length ? "Konsistensi adalah kunci." : "Mulai catat performa."}</strong><br />{props.insightReports.length ? `Lihat ringkasan konten ${props.platformFilter === "Semua platform" ? "di semua platform" : `di ${props.platformFilter}`}.` : "Tambahkan laporan pertama untuk melihat ringkasan."}</p></div>
         </section>
       </div>
       <section className="panel report-panel">
         <div className="panel-heading report-heading"><div><p className="eyebrow">ARSIP KONTEN</p><h2>Performa terbaru <span className="count-pill">{props.reports.length}</span></h2></div><button type="button" className="text-button" onClick={() => props.openModal()}>Tambah laporan <Icon name="arrow" /></button></div>
         <div className="filter-row">
           <label className="search-box"><Icon name="search" /><input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="Cari konten..." /></label>
-          <select value={props.platformFilter} onChange={(event) => props.setPlatformFilter(event.target.value)} aria-label="Filter platform">
-            <option>Semua platform</option>{platforms.map((platform) => <option key={platform}>{platform}</option>)}
-          </select>
         </div>
         {props.reports.length === 0 ? <EmptyState title="Belum ada laporan" description="Tambahkan laporan secara manual atau sinkronkan dari kalender dan papan ide." /> : (
           <div className="table-scroll"><table className="data-table"><thead><tr><th>Konten</th><th>Platform</th><th>Tanggal</th><th>Followers</th><th>Tayangan</th><th>Jangkauan</th><th>Engagement</th><th><span className="sr-only">Aksi</span></th></tr></thead><tbody>
             {props.reports.map((report) => <tr key={report.id}>
               <td><div className="content-cell"><span className={`platform-avatar ${platformClass(report.platform)}`}><PlatformIcon platform={platformLabel(report.platform)} /></span><span><strong>{report.title}</strong><small>{report.tag || "Konten"} · {report.description || "—"}</small></span></div></td>
               <td><span className={platformClass(report.platform)}><PlatformIcon platform={platformLabel(report.platform)} />{platformLabel(report.platform)}</span></td><td>{formatDate(report.date)}</td><td>{formatNumber(report.followers)}</td><td>{formatNumber(report.tayangan)}</td><td>{formatNumber(report.jangkauan)}</td><td><span className="engagement-value">{report.engagement || "—"}</span></td>
-              <td><div className="row-actions"><button title="Edit laporan" type="button" onClick={() => props.openModal(report)}><Icon name="edit" /></button><button title="Hapus laporan" type="button" onClick={() => props.deleteItem(report)}><Icon name="trash" /></button></div></td>
+              <td><div className="row-actions"><button title="Edit laporan" aria-label={`Edit laporan ${report.title}`} type="button" onClick={() => props.openModal(report)} disabled={props.busy}><Icon name="edit" /></button><button title="Hapus laporan" aria-label={`Hapus laporan ${report.title}`} type="button" onClick={() => props.deleteItem(report)} disabled={props.busy}><Icon name="trash" /></button></div></td>
             </tr>)}
           </tbody></table></div>
         )}
@@ -660,18 +802,56 @@ function IdeasPage(props: {
   );
 }
 
-function SettingsPage(props: { settings: Record<string, string>; databaseConnected: boolean; onSave: (event: FormEvent<HTMLFormElement>) => void }) {
+function SettingsPage(props: { settings: Record<string, string>; databaseConnected: boolean; onSave: (event: FormEvent<HTMLFormElement>, profileImage: string) => void }) {
   const { settings } = props;
+  const [profileImage, setProfileImage] = useState(getProfileImage(settings.profileImage));
+  const [photoError, setPhotoError] = useState("");
+  const workspaceInitial = settings.workspaceName?.trim().charAt(0).toUpperCase() || "K";
+
+  const chooseProfileImage = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+
+    try {
+      setProfileImage(await resizeProfileImage(file));
+      setPhotoError("");
+    } catch (error) {
+      setPhotoError(error instanceof Error ? error.message : "Foto tidak dapat digunakan.");
+    }
+  };
+
+  const submitSettings = (event: FormEvent<HTMLFormElement>) => {
+    if (photoError) {
+      event.preventDefault();
+      return;
+    }
+    props.onSave(event, profileImage);
+  };
+
   return (
     <>
       <PageHeading eyebrow="SESUAIKAN WORKSPACE" title="Pengaturan" description="Atur preferensi agar ruang kerjamu terasa lebih personal." />
-      <form className="settings-layout" onSubmit={props.onSave}>
+      <form className="settings-layout" onSubmit={submitSettings}>
         <div className="settings-main">
+          <section className="panel settings-panel">
+            <div className="settings-panel-heading"><span className="settings-icon"><Icon name="spark" /></span><div><h2>Foto profil</h2><p>Pilih foto untuk avatar workspace di navigasi dan header.</p></div></div>
+            <div className="profile-photo-layout">
+              <WorkspaceAvatar image={profileImage} initial={workspaceInitial} className="profile-photo-preview" />
+              <div className="profile-photo-controls">
+                <label className="field"><span>Pilih foto profil</span><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={chooseProfileImage} /></label>
+                <small className="profile-photo-hint">Gambar akan diperkecil otomatis. Maksimal 10 MB.</small>
+                {photoError && <p className="profile-photo-error" role="alert">{photoError}</p>}
+                {profileImage && <button className="button button-quiet profile-photo-remove" type="button" onClick={() => { setProfileImage(""); setPhotoError(""); }}>Hapus foto</button>}
+              </div>
+            </div>
+          </section>
           <section className="panel settings-panel"><div className="settings-panel-heading"><span className="settings-icon"><Icon name="spark" /></span><div><h2>Nama workspace</h2><p>Nama ini akan tampil di navigasi dan header seluruh halaman.</p></div></div><div className="settings-fields"><label className="field field-wide"><span>Nama workspace</span><input required maxLength={60} name="workspaceName" defaultValue={settings.workspaceName || "Kundrew Studio"} placeholder="Contoh: Studio Kreatif" /></label></div></section>
           <section className="panel settings-panel"><div className="settings-panel-heading"><span className="settings-icon settings-icon-pink">◎</span><div><h2>Platform tersedia</h2><p>Pilih salah satu saat menambahkan ide, jadwal, atau laporan.</p></div></div><div className="platform-listing">{platforms.map((platform) => <div className="platform-listing-row" key={platform}><span className={`platform-avatar ${platformClass(platform)}`}><PlatformIcon platform={platform} /></span><span><strong>{platform}</strong><small>Tersedia untuk konten workspace</small></span></div>)}</div></section>
-          <div className="settings-save"><button className="button button-primary" type="submit">Simpan perubahan <Icon name="arrow" /></button></div>
+          <div className="settings-save"><button className="button button-primary" type="submit" disabled={Boolean(photoError)}>Simpan perubahan <Icon name="arrow" /></button></div>
         </div>
-        <aside className="settings-side"><div className="settings-aside-art">✳</div><p className="eyebrow">RUANG KREATIFMU</p><h2>Dirancang untuk ide yang terus bergerak.</h2><p>Nama workspace disimpan di browser ini. Data laporan, jadwal, dan ide tersimpan di database.</p><span className={`storage-status ${props.databaseConnected ? "" : "storage-error"}`}><i /> {props.databaseConnected ? "Database terhubung" : "Database belum terhubung"}</span></aside>
+        <aside className="settings-side"><div className="settings-aside-art">✳</div><p className="eyebrow">RUANG KREATIFMU</p><h2>Dirancang untuk ide yang terus bergerak.</h2><p>Preferensi dan foto profil disimpan di browser ini. Data laporan, jadwal, dan ide tersimpan di database.</p><span className={`storage-status ${props.databaseConnected ? "" : "storage-error"}`}><i /> {props.databaseConnected ? "Database terhubung" : "Database belum terhubung"}</span></aside>
       </form>
     </>
   );
@@ -695,11 +875,48 @@ function RecordModal({ modal, busy, onClose, onSubmit }: { modal: Exclude<ModalS
         {modal.type === "idea" && <label className="field"><span>Kategori</span><input name="category" defaultValue={value("category")} placeholder="Contoh: Edukasi" /></label>}
       </div>
       {modal.type === "report" && <div className="field-grid three-fields"><label className="field"><span>Followers</span><input name="followers" defaultValue={value("followers") === "-" ? "" : value("followers")} placeholder="0" /></label><label className="field"><span>Tayangan</span><input name="tayangan" defaultValue={value("tayangan") === "-" ? "" : value("tayangan")} placeholder="0" /></label><label className="field"><span>Jangkauan</span><input name="jangkauan" defaultValue={value("jangkauan") === "-" ? "" : value("jangkauan")} placeholder="0" /></label></div>}
-      {modal.type === "report" && <div className="field-grid"><label className="field"><span>Engagement</span><input name="engagement" defaultValue={value("engagement") === "-%" ? "" : value("engagement")} placeholder="4.5%" /></label><label className="field"><span>Periode</span><select name="period" defaultValue={value("period") || initial.period}><option value="mingguan">Mingguan</option><option value="bulanan">Bulanan</option></select></label></div>}
+      {modal.type === "report" && <div className="field-grid"><label className="field"><span>Tanggal upload</span><input type="date" required name="date" defaultValue={value("date") || initial.date} /></label><label className="field"><span>Engagement</span><input name="engagement" defaultValue={value("engagement") === "-%" ? "" : value("engagement")} placeholder="4.5%" /></label><label className="field"><span>Periode</span><select name="period" defaultValue={value("period") || initial.period}><option value="mingguan">Mingguan</option><option value="bulanan">Bulanan</option></select></label></div>}
       {modal.type === "schedule" && <div className="field-grid"><label className="field"><span>Tanggal</span><input type="date" required name="date" defaultValue={value("date") || modal.date || initial.date} /></label><label className="field"><span>Waktu</span><input type="time" required name="time" defaultValue={value("time") || initial.time} /></label><label className="field"><span>Status</span><select name="status" defaultValue={value("status") || initial.status}><option value="scheduled">Terjadwal</option><option value="draft">Draft</option><option value="published">Terbit</option></select></label></div>}
       {modal.type === "idea" && <label className="field"><span>Status ide</span><select name="column" defaultValue={value("column") || modal.column || "ideas"}>{columns.map((column) => <option key={column.id} value={column.id}>{column.label}</option>)}</select></label>}
       <label className="field field-wide"><span>Deskripsi</span><textarea rows={3} name="description" defaultValue={value("description")} placeholder="Tambahkan catatan singkat..." /></label>
       <div className="modal-footer"><button type="button" className="button button-quiet" onClick={onClose}>Batal</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? "Menyimpan..." : "Simpan"} <Icon name="arrow" /></button></div>
     </form>
   </section></div>;
+}
+
+function ConfirmationDialog({
+  confirmation,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  confirmation: Exclude<ConfirmationState, null>;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const isDelete = confirmation.type === "delete";
+  const title = isDelete ? String(confirmation.item.title ?? "data ini") : confirmation.title;
+  const heading = isDelete ? "Hapus data ini?" : "Simpan perubahan?";
+
+  return (
+    <div className="confirm-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <section className="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-description">
+        <span className={`confirm-icon ${isDelete ? "confirm-icon-danger" : ""}`}><Icon name={isDelete ? "trash" : "edit"} /></span>
+        <p className="eyebrow">{isDelete ? "KONFIRMASI HAPUS" : "KONFIRMASI EDIT"}</p>
+        <h2 id="confirm-title">{heading}</h2>
+        <p id="confirm-description">
+          {isDelete
+            ? `Kamu yakin ingin menghapus "${title}"? Tindakan ini tidak dapat dibatalkan.`
+            : `Simpan perubahan untuk "${title}"?`}
+        </p>
+        <div className="confirm-actions">
+          <button type="button" className="button button-quiet" onClick={onCancel} disabled={busy} autoFocus>Tidak</button>
+          <button type="button" className={`button ${isDelete ? "button-danger" : "button-primary"}`} onClick={onConfirm} disabled={busy}>
+            {busy ? "Memproses..." : isDelete ? "Ya, hapus" : "Ya, simpan"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
 }
