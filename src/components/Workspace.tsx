@@ -751,6 +751,7 @@ function PlannerPage(props: {
   publish: (item: RecordItem) => void;
   sync: (item: RecordItem) => void;
 }) {
+  const [expandedDates, setExpandedDates] = useState<Set<string>>(() => new Set());
   const mondayOffset = (day: number) => (day + 6) % 7;
   const monthStart = new Date(props.date.getFullYear(), props.date.getMonth(), 1);
   const weekStart = new Date(props.date);
@@ -771,6 +772,14 @@ function PlannerPage(props: {
     props.setDate(next);
   };
   const schedulesOn = (date: Date) => props.schedules.filter((schedule) => String(schedule.date).slice(0, 10) === dateKey(date));
+  const toggleDateExpanded = (date: string) => {
+    setExpandedDates((expanded) => {
+      const next = new Set(expanded);
+      if (next.has(date)) next.delete(date);
+      else next.add(date);
+      return next;
+    });
+  };
   return (
     <>
       <PageHeading eyebrow="JAGA RITME PUBLIKASI" title="Content Planner" description="Atur ritme kontenmu. Satu kalender, semua platform." action={<button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Buat jadwal</button>} />
@@ -788,9 +797,24 @@ function PlannerPage(props: {
             {daysLabel.map((label) => <div className="calendar-weekday" key={label}>{label}</div>)}
             {calendarDays.map((date, index) => {
               const dateSchedules = schedulesOn(date);
+              const dateId = dateKey(date);
+              const isExpanded = expandedDates.has(dateId);
+              const visibleSchedules = isExpanded ? dateSchedules : dateSchedules.slice(0, 3);
               return <div key={dateKey(date)} className={`calendar-day ${props.view === "month" && date.getMonth() !== props.date.getMonth() ? "outside-month" : ""} ${dateKey(date) === dateKey(new Date()) ? "today" : ""} ${props.view === "week" ? `week-day-${index}` : ""}`}>
                 <div className="day-head"><span>{date.getDate()}</span>{props.view === "week" && <small>{new Intl.DateTimeFormat("id-ID", { month: "short" }).format(date)}</small>}<button type="button" aria-label={`Tambah jadwal ${dateKey(date)}`} onClick={() => props.openModal(undefined, dateKey(date))}>+</button></div>
-                <div className="day-events">{dateSchedules.slice(0, 3).map((item) => <button type="button" className={`event-chip event-${item.status}`} key={item.id} onClick={() => props.openModal(item)}><span>{item.time}</span> {item.title}</button>)}{dateSchedules.length > 3 && <small className="more-events">+{dateSchedules.length - 3} lainnya</small>}</div>
+                <div className="day-events">
+                  {visibleSchedules.map((item) => (
+                    <div className="calendar-event-row" key={item.id}>
+                      <button type="button" className={`event-chip event-${item.status}`} onClick={() => props.openModal(item)}><span>{item.time}</span> {item.title}</button>
+                      <button type="button" className="event-delete" title="Hapus jadwal" aria-label={`Hapus jadwal ${item.title}`} onClick={() => props.deleteItem(item)} disabled={props.busy}><Icon name="trash" /></button>
+                    </div>
+                  ))}
+                  {dateSchedules.length > 3 && (
+                    <button type="button" className="more-events" aria-expanded={isExpanded} onClick={() => toggleDateExpanded(dateId)}>
+                      {isExpanded ? "Sembunyikan" : `+${dateSchedules.length - 3} lainnya`}
+                    </button>
+                  )}
+                </div>
               </div>;
             })}
           </div>
