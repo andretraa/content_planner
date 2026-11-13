@@ -152,6 +152,12 @@ h1, h2, h3, p { margin-top: 0; }
 .data-table th { padding: 10px 8px; border-bottom: 1px solid #f0eff4; color: #aaa8b5; font-size: 8px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .data-table td { padding: 11px 8px; border-bottom: 1px solid #f4f3f6; color: #777587; font-size: 9px; }
 .data-table tr:last-child td { border-bottom: 0; }.data-table tbody tr { animation: row-in .3s both; }.data-table tbody tr:hover { background: #fcfbff; }
+.report-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-top: 1px solid #f0eff4; }
+.pagination-info { color: #9693a4; font-size: 10px; }
+.pagination-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.pagination-controls button { min-width: 29px; height: 29px; padding: 0 8px; border: 1px solid #eeedf3; border-radius: 7px; color: #777587; background: #fff; font-size: 10px; }
+.pagination-controls button:hover:not(:disabled), .pagination-controls button.selected { border-color: #e4defa; color: #7158d5; background: #f5f2ff; }
+.pagination-controls button:disabled { cursor: not-allowed; opacity: .5; }
 .content-cell { display: flex; min-width: 180px; align-items: center; gap: 9px; }
 .content-cell strong, .content-cell small { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .content-cell strong { color: #464456; font-size: 9px; }.content-cell small { margin-top: 3px; color: #aaa8b4; font-size: 8px; }

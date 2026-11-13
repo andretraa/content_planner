@@ -22,6 +22,7 @@ const navigation: { id: Page; label: string; href: string; hint: string }[] = [
 ];
 
 const platforms = ["Instagram", "TikTok", "Threads", "YouTube"];
+const reportsPerPage = 7;
 const platformLabels: Record<string, string> = {
   instagram: "Instagram",
   tiktok: "TikTok",
@@ -626,12 +627,28 @@ function ReportsPage(props: {
   openModal: (item?: RecordItem) => void;
   deleteItem: (item: RecordItem) => void;
 }) {
+  const [page, setPage] = useState(1);
   const visiblePlatforms = props.platformFilter === "Semua platform" ? platforms : [props.platformFilter];
   const platformCounts = visiblePlatforms.map((platform) => ({
     name: platform,
     count: props.insightReports.filter((item) => platformLabel(item.platform) === platform).length,
   }));
   const maxPlatformCount = Math.max(1, ...platformCounts.map((item) => item.count));
+  const pageCount = Math.max(1, Math.ceil(props.reports.length / reportsPerPage));
+  const currentPage = Math.min(page, pageCount);
+  const pageReports = props.reports.slice((currentPage - 1) * reportsPerPage, currentPage * reportsPerPage);
+  const setQuery = (query: string) => {
+    setPage(1);
+    props.setQuery(query);
+  };
+  const setPlatformFilter = (platform: string) => {
+    setPage(1);
+    props.setPlatformFilter(platform);
+  };
+  const setPeriod = (period: string) => {
+    setPage(1);
+    props.setPeriod(period);
+  };
   return (
     <>
       <PageHeading eyebrow="RINGKASAN PERFORMA" title="Laporan Sosmed" description="Pahami performa konten dan temukan hal yang paling disukai audiens." action={
@@ -647,7 +664,7 @@ function ReportsPage(props: {
       <div className="content-grid analytics-grid">
         <section className="panel trend-panel">
           <div className="panel-heading"><div><p className="eyebrow">OVERVIEW</p><h2>Aktivitas konten</h2></div><div className="segmented">
-            {[["mingguan", "Minggu"], ["bulanan", "Bulan"], ["semua", "Semua"]].map(([value, label]) => <button key={value} type="button" className={props.period === value ? "selected" : ""} onClick={() => props.setPeriod(value)}>{label}</button>)}
+            {[["mingguan", "Minggu"], ["bulanan", "Bulan"], ["semua", "Semua"]].map(([value, label]) => <button key={value} type="button" className={props.period === value ? "selected" : ""} onClick={() => setPeriod(value)}>{label}</button>)}
           </div></div>
           <div className="chart-area">
             <div className="chart-y-labels"><span>100</span><span>75</span><span>50</span><span>25</span><span>0</span></div>
@@ -660,7 +677,7 @@ function ReportsPage(props: {
         </section>
         <section className="panel insight-panel">
           <div className="panel-heading insight-heading"><div><p className="eyebrow">INSIGHT PER PLATFORM</p><h2>{props.platformFilter === "Semua platform" ? "Performa platform" : `Performa ${props.platformFilter}`}</h2></div>
-            <select className="insight-filter" value={props.platformFilter} onChange={(event) => props.setPlatformFilter(event.target.value)} aria-label="Filter insight berdasarkan platform">
+            <select className="insight-filter" value={props.platformFilter} onChange={(event) => setPlatformFilter(event.target.value)} aria-label="Filter insight berdasarkan platform">
               <option>Semua platform</option>{platforms.map((platform) => <option key={platform}>{platform}</option>)}
             </select>
           </div>
@@ -672,16 +689,40 @@ function ReportsPage(props: {
       <section className="panel report-panel">
         <div className="panel-heading report-heading"><div><p className="eyebrow">ARSIP KONTEN</p><h2>Performa terbaru <span className="count-pill">{props.reports.length}</span></h2></div><button type="button" className="text-button" onClick={() => props.openModal()}>Tambah laporan <Icon name="arrow" /></button></div>
         <div className="filter-row">
-          <label className="search-box"><Icon name="search" /><input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="Cari konten..." /></label>
+          <label className="search-box"><Icon name="search" /><input value={props.query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari konten..." /></label>
         </div>
         {props.reports.length === 0 ? <EmptyState title="Belum ada laporan" description="Tambahkan laporan secara manual atau sinkronkan dari kalender dan papan ide." /> : (
-          <div className="table-scroll"><table className="data-table"><thead><tr><th>Konten</th><th>Platform</th><th>Tanggal</th><th>Followers</th><th>Tayangan</th><th>Jangkauan</th><th>Engagement</th><th><span className="sr-only">Aksi</span></th></tr></thead><tbody>
-            {props.reports.map((report) => <tr key={report.id}>
+          <div className="table-scroll"><table className="data-table"><thead><tr><th>No.</th><th>Konten</th><th>Platform</th><th>Tanggal</th><th>Followers</th><th>Tayangan</th><th>Jangkauan</th><th>Engagement</th><th><span className="sr-only">Aksi</span></th></tr></thead><tbody>
+            {pageReports.map((report, index) => <tr key={report.id}>
+              <td>{(currentPage - 1) * reportsPerPage + index + 1}</td>
               <td><div className="content-cell"><span className={`platform-avatar ${platformClass(report.platform)}`}><PlatformIcon platform={platformLabel(report.platform)} /></span><span><strong>{report.title}</strong><small>{report.tag || "Konten"} · {report.description || "—"}</small></span></div></td>
               <td><span className={platformClass(report.platform)}><PlatformIcon platform={platformLabel(report.platform)} />{platformLabel(report.platform)}</span></td><td>{formatDate(report.date)}</td><td>{formatNumber(report.followers)}</td><td>{formatNumber(report.tayangan)}</td><td>{formatNumber(report.jangkauan)}</td><td><span className="engagement-value">{report.engagement || "—"}</span></td>
               <td><div className="row-actions"><button title="Edit laporan" aria-label={`Edit laporan ${report.title}`} type="button" onClick={() => props.openModal(report)} disabled={props.busy}><Icon name="edit" /></button><button title="Hapus laporan" aria-label={`Hapus laporan ${report.title}`} type="button" onClick={() => props.deleteItem(report)} disabled={props.busy}><Icon name="trash" /></button></div></td>
             </tr>)}
           </tbody></table></div>
+        )}
+        {props.reports.length > 0 && (
+          <div className="report-pagination">
+            <span className="pagination-info">Menampilkan {(currentPage - 1) * reportsPerPage + 1}–{Math.min(currentPage * reportsPerPage, props.reports.length)} dari {props.reports.length} konten</span>
+            {pageCount > 1 && (
+              <nav className="pagination-controls" aria-label="Navigasi halaman performa terbaru">
+                <button type="button" onClick={() => setPage(currentPage - 1)} disabled={currentPage === 1}>Sebelumnya</button>
+                {Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => (
+                  <button
+                    key={pageNumber}
+                    type="button"
+                    className={currentPage === pageNumber ? "selected" : ""}
+                    aria-label={`Halaman ${pageNumber}`}
+                    aria-current={currentPage === pageNumber ? "page" : undefined}
+                    onClick={() => setPage(pageNumber)}
+                  >
+                    {pageNumber}
+                  </button>
+                ))}
+                <button type="button" onClick={() => setPage(currentPage + 1)} disabled={currentPage === pageCount}>Berikutnya</button>
+              </nav>
+            )}
+          </div>
         )}
       </section>
       <div className="bottom-grid">
