@@ -345,6 +345,7 @@ export default function Workspace({ page }: { page: Page }) {
   const workspaceName = settings.workspaceName?.trim() || "Kundrew Studio";
   const workspaceInitial = workspaceName.charAt(0).toUpperCase() || "K";
   const profileImage = getProfileImage(settings.profileImage);
+  const username = (settings.username?.trim() || userEmail.split("@")[0]).replace(/^@+/, "");
 
   useEffect(() => {
     if (!authClient) return;
@@ -602,13 +603,20 @@ export default function Workspace({ page }: { page: Page }) {
     : 0;
   const saveSettings = (event: FormEvent<HTMLFormElement>, profileImage: string) => {
     event.preventDefault();
-    const workspaceName = new FormData(event.currentTarget).get("workspaceName");
+    const formData = new FormData(event.currentTarget);
+    const workspaceName = formData.get("workspaceName");
+    const enteredUsername = formData.get("username");
     const normalizedName = typeof workspaceName === "string" ? workspaceName.trim() : "";
+    const normalizedUsername = typeof enteredUsername === "string" ? enteredUsername.trim().replace(/^@+/, "") : "";
     if (!normalizedName) {
       setError("Nama workspace wajib diisi.");
       return;
     }
-    const snapshot = JSON.stringify({ workspaceName: normalizedName, profileImage });
+    if (!normalizedUsername) {
+      setError("Username wajib diisi.");
+      return;
+    }
+    const snapshot = JSON.stringify({ username: normalizedUsername, workspaceName: normalizedName, profileImage });
     try {
       window.localStorage.setItem(settingsKey, snapshot);
       window.dispatchEvent(new StorageEvent("storage", { key: settingsKey, newValue: snapshot }));
@@ -654,7 +662,7 @@ export default function Workspace({ page }: { page: Page }) {
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumb"><span>{workspaceName}</span><span className="crumb-slash">/</span><strong>{active.label}</strong></div>
-          <div className="topbar-actions"><span className="today-label">{formatDate(dateKey(new Date()), { weekday: "short", day: "numeric", month: "short" })}</span>{userEmail && <span className="today-label">{userEmail}</span>}<WorkspaceAvatar image={profileImage} initial={workspaceInitial} className="top-avatar" /><button className="button button-quiet" type="button" onClick={() => { void signOut(); }}>Keluar</button></div>
+          <div className="topbar-actions"><span className="today-label">{formatDate(dateKey(new Date()), { weekday: "short", day: "numeric", month: "short" })}</span>{username && <span className="today-label">{username}</span>}<WorkspaceAvatar image={profileImage} initial={workspaceInitial} className="top-avatar" /><button className="button button-quiet" type="button" onClick={() => { void signOut(); }}>Keluar</button></div>
         </header>
         <div className="page-wrap">
           {error && <div className="alert alert-error" role="alert"><span>{error}</span><button type="button"           onClick={() => { setError(""); void loadData(); }}>Coba lagi</button></div>}
@@ -714,6 +722,7 @@ export default function Workspace({ page }: { page: Page }) {
             <SettingsPage
               key={settingsSnapshot}
               settings={settings}
+              userEmail={userEmail}
               databaseConnected={!loading && !error}
               accessToken={accessToken}
               onSave={saveSettings}
@@ -1051,7 +1060,7 @@ function IdeasPage(props: {
   );
 }
 
-function SettingsPage(props: { settings: Record<string, string>; databaseConnected: boolean; accessToken: string; onSave: (event: FormEvent<HTMLFormElement>, profileImage: string) => void }) {
+function SettingsPage(props: { settings: Record<string, string>; userEmail: string; databaseConnected: boolean; accessToken: string; onSave: (event: FormEvent<HTMLFormElement>, profileImage: string) => void }) {
   const { settings } = props;
   const [profileImage, setProfileImage] = useState(getProfileImage(settings.profileImage));
   const [photoError, setPhotoError] = useState("");
@@ -1096,6 +1105,7 @@ function SettingsPage(props: { settings: Record<string, string>; databaseConnect
               </div>
             </div>
           </section>
+          <section className="panel settings-panel"><div className="settings-panel-heading"><span className="settings-icon"><Icon name="spark" /></span><div><h2>Username</h2><p>Username ini ditampilkan di header menggantikan email akun.</p></div></div><div className="settings-fields"><label className="field field-wide"><span>Username</span><input required maxLength={40} name="username" defaultValue={settings.username || props.userEmail.split("@")[0]} placeholder="Contoh: namapengguna" autoComplete="nickname" /></label></div></section>
           <section className="panel settings-panel"><div className="settings-panel-heading"><span className="settings-icon"><Icon name="spark" /></span><div><h2>Nama workspace</h2><p>Nama ini akan tampil di navigasi dan header seluruh halaman.</p></div></div><div className="settings-fields"><label className="field field-wide"><span>Nama workspace</span><input required maxLength={60} name="workspaceName" defaultValue={settings.workspaceName || "Kundrew Studio"} placeholder="Contoh: Studio Kreatif" /></label></div></section>
           <InstagramConnectionSettings accessToken={props.accessToken} />
           <section className="panel settings-panel"><div className="settings-panel-heading"><span className="settings-icon settings-icon-pink">◎</span><div><h2>Platform tersedia</h2><p>Pilih salah satu saat menambahkan ide, jadwal, atau laporan.</p></div></div><div className="platform-listing">{platforms.map((platform) => <div className="platform-listing-row" key={platform}><span className={`platform-avatar ${platformClass(platform)}`}><PlatformIcon platform={platform} /></span><span><strong>{platform}</strong><small>Tersedia untuk konten workspace</small></span></div>)}</div></section>
