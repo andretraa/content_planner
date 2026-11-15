@@ -2,13 +2,28 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import AuthGate from "@/components/AuthGate";
+import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 
 type Page = "reports" | "planner" | "ideas" | "settings";
 type RecordItem = Record<string, string | number | null | undefined> & { id: string | number };
 type IdeaColumn = "ideas" | "in_progress" | "ready_to_shoot" | "completed";
 type ModalState = { type: "report" | "schedule" | "idea"; item?: RecordItem; column?: IdeaColumn; date?: string } | null;
 type Collection = "reports" | "schedules" | "ideas";
+type InstagramConnection = {
+  username: string;
+  accountType: string | null;
+  profile: { followers: number | null; mediaCount: number | null };
+  insights: {
+    reach: number | null;
+    accountsEngaged: number | null;
+    totalInteractions: number | null;
+    periodEnd: string | null;
+  };
+  lastSyncedAt: string | null;
+  tokenExpiresAt: string | null;
+};
 type ConfirmationState =
   | { type: "save"; collection: Collection; id: string | number; payload: Record<string, FormDataEntryValue>; title: string }
   | { type: "delete"; collection: Collection; item: RecordItem }
@@ -110,16 +125,16 @@ function platformClass(value: unknown) {
   return `platform platform-${String(value ?? "instagram").toLowerCase()}`;
 }
 
-function subscribeToSettings(callback: () => void) {
+function subscribeToSettings(callback: () => void, key: string) {
   const listener = (event: StorageEvent) => {
-    if (event.key === "planning-kundrew-settings" || event.key === null) callback();
+    if (event.key === key || event.key === null) callback();
   };
   window.addEventListener("storage", listener);
   return () => window.removeEventListener("storage", listener);
 }
 
-function getSettingsSnapshot() {
-  return window.localStorage.getItem("planning-kundrew-settings") ?? "{}";
+function getSettingsSnapshot(key: string) {
+  return window.localStorage.getItem(key) ?? "{}";
 }
 
 function parseSettings(snapshot: string): Record<string, string> {
@@ -132,6 +147,62 @@ function parseSettings(snapshot: string): Record<string, string> {
     return {};
   }
   return {};
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function nullableMetric(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseInstagramConnection(value: unknown): InstagramConnection | null {
+  if (!isObjectRecord(value) || typeof value.username !== "string") return null;
+  const profile = isObjectRecord(value.profile) ? value.profile : {};
+  const insights = isObjectRecord(value.insights) ? value.insights : {};
+  return {
+    username: value.username,
+    accountType: typeof value.accountType === "string" ? value.accountType : null,
+    profile: {
+      followers: nullableMetric(profile.followers),
+      mediaCount: nullableMetric(profile.mediaCount),
+    },
+    insights: {
+      reach: nullableMetric(insights.reach),
+      accountsEngaged: nullableMetric(insights.accountsEngaged),
+      totalInteractions: nullableMetric(insights.totalInteractions),
+      periodEnd: typeof insights.periodEnd === "string" ? insights.periodEnd : null,
+    },
+    lastSyncedAt: typeof value.lastSyncedAt === "string" ? value.lastSyncedAt : null,
+    tokenExpiresAt: typeof value.tokenExpiresAt === "string" ? value.tokenExpiresAt : null,
+  };
+}
+
+async function getInstagramStatus(accessToken: string) {
+  const response = await fetch("/api/integrations/instagram", {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const payload = await readApiResponse(response, "Status Instagram tidak dapat dimuat.");
+  return {
+    configured: payload.configured === true,
+    connected: payload.connected === true,
+    connection: parseInstagramConnection(payload.data),
+  };
+}
+
+async function syncInstagram(accessToken: string): Promise<InstagramConnection> {
+  const response = await fetch("/api/integrations/instagram/sync", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const payload = await readApiResponse(response, "Insight Instagram tidak dapat disinkronkan.");
+  const connection = parseInstagramConnection(payload.data);
+  if (!connection) throw new Error("Format insight Instagram dari server tidak valid.");
+  return connection;
 }
 
 function getProfileImage(value?: string) {
@@ -244,6 +315,12 @@ function Icon({ name }: { name: string }) {
 }
 
 export default function Workspace({ page }: { page: Page }) {
+  const [authClient] = useState(createSupabaseBrowserClient);
+  const [authLoading, setAuthLoading] = useState(Boolean(authClient));
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [userId, setUserId] = useState("");
+  const [userEmail, setUserEmail] = useState("");
+  const activeToken = useRef<string | null>(null);
   const [reports, setReports] = useState<RecordItem[]>([]);
   const [schedules, setSchedules] = useState<RecordItem[]>([]);
   const [ideas, setIdeas] = useState<RecordItem[]>([]);
@@ -258,15 +335,60 @@ export default function Workspace({ page }: { page: Page }) {
   const [period, setPeriod] = useState("mingguan");
   const [calendarView, setCalendarView] = useState<"month" | "week" | "list">("month");
   const [calendarDate, setCalendarDate] = useState(() => new Date());
-  const settingsSnapshot = useSyncExternalStore(subscribeToSettings, getSettingsSnapshot, () => "{}");
+  const settingsKey = `planning-kundrew-settings:${userId || "anonymous"}`;
+  const settingsSnapshot = useSyncExternalStore(
+    (callback) => subscribeToSettings(callback, settingsKey),
+    () => getSettingsSnapshot(settingsKey),
+    () => "{}",
+  );
   const settings = useMemo(() => parseSettings(settingsSnapshot), [settingsSnapshot]);
   const workspaceName = settings.workspaceName?.trim() || "Kundrew Studio";
   const workspaceInitial = workspaceName.charAt(0).toUpperCase() || "K";
   const profileImage = getProfileImage(settings.profileImage);
 
+  useEffect(() => {
+    if (!authClient) return;
+
+    let active = true;
+    const syncSession = (session: Awaited<ReturnType<typeof authClient.auth.getSession>>["data"]["session"]) => {
+      const token = session?.access_token ?? null;
+      activeToken.current = token;
+      setReports([]);
+      setSchedules([]);
+      setIdeas([]);
+      setLoading(Boolean(token));
+      if (token) setError("");
+      setAccessToken(session?.access_token ?? null);
+      setUserId(session?.user.id ?? "");
+      setUserEmail(session?.user.email ?? "");
+      setAuthLoading(false);
+    };
+    const { data: { subscription } } = authClient.auth.onAuthStateChange((_event, session) => {
+      syncSession(session);
+    });
+    void authClient.auth.getSession().then(({ data, error: sessionError }) => {
+      if (!active) return;
+      if (sessionError) setError(sessionError.message);
+      syncSession(data.session);
+    }).catch((sessionError: unknown) => {
+      if (!active) return;
+      setError(sessionError instanceof Error ? sessionError.message : "Sesi akun tidak dapat diperiksa.");
+      setAuthLoading(false);
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, [authClient]);
+
   const loadData = useCallback(async () => {
+    if (!accessToken) return;
     try {
-      const responses = await Promise.all(["reports", "schedules", "ideas"].map((item) => fetch(`/api/${item}`, { cache: "no-store" })));
+      const responses = await Promise.all(["reports", "schedules", "ideas"].map((item) => fetch(`/api/${item}`, {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })));
       const payloads = await Promise.all(
         responses.map(async (response) => {
           const json = await readApiResponse(response, "Data tidak dapat dimuat.");
@@ -274,19 +396,21 @@ export default function Workspace({ page }: { page: Page }) {
           return json.data as RecordItem[];
         }),
       );
+      if (activeToken.current !== accessToken) return;
       setReports(payloads[0]);
       setSchedules(payloads[1]);
       setIdeas(payloads[2]);
     } catch (loadError) {
+      if (activeToken.current !== accessToken) return;
       setError(loadError instanceof Error ? loadError.message : "Data tidak dapat dimuat.");
     } finally {
-      setLoading(false);
+      if (activeToken.current === accessToken) setLoading(false);
     }
-  }, []);
+  }, [accessToken]);
 
   useEffect(() => {
-    void Promise.resolve().then(loadData);
-  }, [loadData]);
+    if (!authLoading && accessToken) void Promise.resolve().then(loadData);
+  }, [accessToken, authLoading, loadData]);
 
   useEffect(() => {
     if (!notice) return;
@@ -297,7 +421,11 @@ export default function Workspace({ page }: { page: Page }) {
   const callApi = async (url: string, method: string, body?: unknown) => {
     const response = await fetch(url, {
       method,
-      ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     const result = await readApiResponse(response, "Permintaan gagal.");
     return result;
@@ -312,7 +440,9 @@ export default function Workspace({ page }: { page: Page }) {
       const params = new URLSearchParams();
       if (platformFilter !== "Semua platform") params.set("platform", platformFilter);
       const queryString = params.toString();
-      const response = await fetch(`/api/reports/export${queryString ? `?${queryString}` : ""}`);
+      const response = await fetch(`/api/reports/export${queryString ? `?${queryString}` : ""}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
       if (!response.ok) {
         await readApiResponse(response, "Laporan tidak dapat diekspor.");
       }
@@ -338,6 +468,16 @@ export default function Workspace({ page }: { page: Page }) {
       setError(actionError instanceof Error ? actionError.message : "Terjadi kesalahan. Silakan coba lagi.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const signOut = async () => {
+    if (!authClient) return;
+    try {
+      const { error: signOutError } = await authClient.auth.signOut();
+      if (signOutError) setError(signOutError.message);
+    } catch (signOutError) {
+      setError(signOutError instanceof Error ? signOutError.message : "Tidak dapat keluar dari akun.");
     }
   };
 
@@ -470,13 +610,15 @@ export default function Workspace({ page }: { page: Page }) {
     }
     const snapshot = JSON.stringify({ workspaceName: normalizedName, profileImage });
     try {
-      window.localStorage.setItem("planning-kundrew-settings", snapshot);
-      window.dispatchEvent(new StorageEvent("storage", { key: "planning-kundrew-settings", newValue: snapshot }));
+      window.localStorage.setItem(settingsKey, snapshot);
+      window.dispatchEvent(new StorageEvent("storage", { key: settingsKey, newValue: snapshot }));
       setNotice("Pengaturan berhasil disimpan di browser ini.");
     } catch {
       setError("Preferensi tidak dapat disimpan di browser ini. Coba pilih foto yang lebih kecil.");
     }
   };
+
+  if (authLoading || !accessToken) return <AuthGate client={authClient} loading={authLoading} />;
 
   return (
     <div className="workspace">
@@ -512,7 +654,7 @@ export default function Workspace({ page }: { page: Page }) {
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumb"><span>{workspaceName}</span><span className="crumb-slash">/</span><strong>{active.label}</strong></div>
-          <div className="topbar-actions"><span className="today-label">{formatDate(dateKey(new Date()), { weekday: "short", day: "numeric", month: "short" })}</span><WorkspaceAvatar image={profileImage} initial={workspaceInitial} className="top-avatar" /></div>
+          <div className="topbar-actions"><span className="today-label">{formatDate(dateKey(new Date()), { weekday: "short", day: "numeric", month: "short" })}</span>{userEmail && <span className="today-label">{userEmail}</span>}<WorkspaceAvatar image={profileImage} initial={workspaceInitial} className="top-avatar" /><button className="button button-quiet" type="button" onClick={() => { void signOut(); }}>Keluar</button></div>
         </header>
         <div className="page-wrap">
           {error && <div className="alert alert-error" role="alert"><span>{error}</span><button type="button"           onClick={() => { setError(""); void loadData(); }}>Coba lagi</button></div>}
@@ -529,6 +671,7 @@ export default function Workspace({ page }: { page: Page }) {
               totalFollowers={totalFollowers}
               totalViews={totalViews}
               averageEngagement={averageEngagement}
+              accessToken={accessToken}
               period={period}
               setPeriod={setPeriod}
               query={query}
@@ -539,6 +682,7 @@ export default function Workspace({ page }: { page: Page }) {
               exportCsv={exportCsv}
               openModal={(item) => setModal({ type: "report", item })}
               deleteItem={(item) => removeRecord("reports", item)}
+              deleteSchedule={(item) => removeRecord("schedules", item)}
             />
           )}
           {page === "planner" && (
@@ -571,6 +715,7 @@ export default function Workspace({ page }: { page: Page }) {
               key={settingsSnapshot}
               settings={settings}
               databaseConnected={!loading && !error}
+              accessToken={accessToken}
               onSave={saveSettings}
             />
           )}
@@ -602,7 +747,7 @@ export default function Workspace({ page }: { page: Page }) {
 function PageHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
   return (
     <div className="page-heading">
-      <div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="page-description">{description}</p></div>
+      <div><p className="eyebrow">{eyebrow}<Icon name="spark" /></p><h1>{title}</h1><p className="page-description">{description}</p></div>
       {action}
     </div>
   );
@@ -616,6 +761,7 @@ function ReportsPage(props: {
   totalFollowers: number;
   totalViews: number;
   averageEngagement: number;
+  accessToken: string;
   period: string;
   setPeriod: (period: string) => void;
   query: string;
@@ -626,6 +772,7 @@ function ReportsPage(props: {
   exportCsv: () => void;
   openModal: (item?: RecordItem) => void;
   deleteItem: (item: RecordItem) => void;
+  deleteSchedule: (item: RecordItem) => void;
 }) {
   const [page, setPage] = useState(1);
   const visiblePlatforms = props.platformFilter === "Semua platform" ? platforms : [props.platformFilter];
@@ -634,6 +781,7 @@ function ReportsPage(props: {
     count: props.insightReports.filter((item) => platformLabel(item.platform) === platform).length,
   }));
   const maxPlatformCount = Math.max(1, ...platformCounts.map((item) => item.count));
+  const upcomingSchedules = props.schedules.filter((schedule) => schedule.status === "draft" || schedule.status === "scheduled");
   const pageCount = Math.max(1, Math.ceil(props.reports.length / reportsPerPage));
   const currentPage = Math.min(page, pageCount);
   const pageReports = props.reports.slice((currentPage - 1) * reportsPerPage, currentPage * reportsPerPage);
@@ -655,6 +803,7 @@ function ReportsPage(props: {
         <div className="heading-actions"><button className="button button-quiet" type="button" onClick={props.exportCsv}><Icon name="download" /> Ekspor CSV</button><button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Tambah laporan</button></div>
       } />
       <div className="welcome-strip"><div className="welcome-orb"><Icon name="spark" /></div><div><strong>Setiap angka punya cerita.</strong><p>Gunakan ringkasan ini untuk melihat konten mana yang membawa dampak paling besar.</p></div><span className="strip-decoration">INSIGHT / 01</span></div>
+      <InstagramInsightsPanel accessToken={props.accessToken} />
       <div className="metric-grid">
         <MetricCard label="Total konten" value={formatNumber(props.insightReports.length)} detail="laporan tersimpan" tone="purple" icon="layers" />
         <MetricCard label="Total followers" value={formatNumber(props.totalFollowers)} detail="followers tercatat" tone="blue" icon="users" />
@@ -727,7 +876,7 @@ function ReportsPage(props: {
       </section>
       <div className="bottom-grid">
         <section className="panel bottom-panel"><div className="panel-heading"><div><p className="eyebrow">LANGKAH BERIKUTNYA</p><h2>Yang akan tayang</h2></div><Link className="text-button" href="/content-planner">Buka planner <Icon name="arrow" /></Link></div>
-          {props.schedules.length === 0 ? <p className="muted-copy">Belum ada jadwal publikasi.</p> : props.schedules.slice(0, 3).map((schedule) => <div className="compact-row" key={schedule.id}><span className={`platform-avatar ${platformClass(schedule.platform)}`}><PlatformIcon platform={platformLabel(schedule.platform)} /></span><span className="compact-title"><strong>{schedule.title}</strong><small>{formatDate(schedule.date)} · {schedule.time}</small></span><span className={`status-badge status-${schedule.status}`}>{schedule.status === "scheduled" ? "Terjadwal" : schedule.status === "published" ? "Terbit" : "Draft"}</span></div>)}
+          {upcomingSchedules.length === 0 ? <p className="muted-copy">{props.schedules.length === 0 ? "Belum ada jadwal publikasi." : "Semua jadwal sudah terbit."}</p> : upcomingSchedules.slice(0, 3).map((schedule) => <div className="compact-row" key={schedule.id}><span className={`platform-avatar ${platformClass(schedule.platform)}`}><PlatformIcon platform={platformLabel(schedule.platform)} /></span><span className="compact-title"><strong>{schedule.title}</strong><small>{formatDate(schedule.date)} · {schedule.time}</small></span><span className={`status-badge status-${schedule.status}`}>{schedule.status === "scheduled" ? "Terjadwal" : "Draft"}</span><div className="row-actions"><button type="button" title="Hapus jadwal" aria-label={`Hapus jadwal ${schedule.title}`} onClick={() => props.deleteSchedule(schedule)} disabled={props.busy}><Icon name="trash" /></button></div></div>)}
         </section>
         <section className="panel bottom-panel idea-callout"><span className="callout-graphic">✳</span><p className="eyebrow">KUMPULKAN INSPIRASI</p><h2>Punya ide baru?</h2><p>Simpan ide sebelum terlupa, lalu wujudkan jadi konten berikutnya.</p><Link className="button button-dark" href="/ide-konten">Buka papan ide <Icon name="arrow" /></Link></section>
       </div>
@@ -752,6 +901,12 @@ function PlannerPage(props: {
   sync: (item: RecordItem) => void;
 }) {
   const [expandedDates, setExpandedDates] = useState<Set<string>>(() => new Set());
+  const [platformFilter, setPlatformFilter] = useState("Semua platform");
+  const filteredSchedules = props.schedules.filter((schedule) => platformFilter === "Semua platform" || platformLabel(schedule.platform) === platformFilter);
+  const upcomingSchedules = filteredSchedules.filter((schedule) => schedule.status === "scheduled");
+  const emptyScheduleState = platformFilter === "Semua platform"
+    ? <EmptyState title="Kalendermu masih kosong" description="Tambahkan jadwal publikasi pertama untuk memulai." />
+    : <EmptyState title={`Belum ada jadwal ${platformFilter}`} description="Pilih platform lain atau tambahkan jadwal untuk platform ini." />;
   const mondayOffset = (day: number) => (day + 6) % 7;
   const monthStart = new Date(props.date.getFullYear(), props.date.getMonth(), 1);
   const weekStart = new Date(props.date);
@@ -771,7 +926,11 @@ function PlannerPage(props: {
     if (props.view !== "week") next.setMonth(next.getMonth() + direction);
     props.setDate(next);
   };
-  const schedulesOn = (date: Date) => props.schedules.filter((schedule) => String(schedule.date).slice(0, 10) === dateKey(date));
+  const schedulesOn = (date: Date) => filteredSchedules.filter((schedule) => String(schedule.date).slice(0, 10) === dateKey(date));
+  const changePlatformFilter = (platform: string) => {
+    setPlatformFilter(platform);
+    setExpandedDates(new Set());
+  };
   const toggleDateExpanded = (date: string) => {
     setExpandedDates((expanded) => {
       const next = new Set(expanded);
@@ -784,44 +943,69 @@ function PlannerPage(props: {
     <>
       <PageHeading eyebrow="JAGA RITME PUBLIKASI" title="Content Planner" description="Atur ritme kontenmu. Satu kalender, semua platform." action={<button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Buat jadwal</button>} />
       <div className="planner-summary">
-        <div className="planner-summary-copy"><span className="summary-icon"><Icon name="calendar" /></span><span><strong>{props.schedules.length} konten direncanakan</strong><small>Di semua platform sosial media</small></span></div>
-        <div className="summary-separator" /><div className="planner-summary-copy"><span className="summary-icon summary-icon-peach"><Icon name="clock" /></span><span><strong>{props.schedules.filter((item) => item.status === "scheduled").length} menunggu publikasi</strong><small>Selesaikan dan catat performanya</small></span></div>
+        <div className="planner-summary-copy"><span className="summary-icon"><Icon name="calendar" /></span><span><strong>{filteredSchedules.length} konten direncanakan</strong><small>{platformFilter === "Semua platform" ? "Di semua platform sosial media" : `Di ${platformFilter}`}</small></span></div>
+        <div className="summary-separator" /><div className="planner-summary-copy"><span className="summary-icon summary-icon-peach"><Icon name="clock" /></span><span><strong>{upcomingSchedules.length} menunggu publikasi</strong><small>Selesaikan dan catat performanya</small></span></div>
         <Link href="/laporan-sosmed" className="button button-outline summary-link">Lihat laporan <Icon name="arrow" /></Link>
       </div>
       <section className="panel calendar-panel">
         <div className="calendar-toolbar"><div className="calendar-title"><div className="calendar-month-label"><p className="eyebrow">KALENDER KONTEN</p><h2>{props.view === "list" ? "Semua jadwal" : props.view === "week" ? `Minggu · ${monthLabel}` : monthLabel}</h2></div><div className="calendar-nav"><button type="button" onClick={() => moveDate(-1)} aria-label="Sebelumnya">‹</button><button type="button" onClick={() => props.setDate(new Date())}>Hari ini</button><button type="button" onClick={() => moveDate(1)} aria-label="Berikutnya">›</button></div></div>
           <div className="segmented">{(["month", "week", "list"] as const).map((value) => <button key={value} type="button" className={props.view === value ? "selected" : ""} onClick={() => props.setView(value)}>{value === "month" ? "Bulan" : value === "week" ? "Minggu" : "Daftar"}</button>)}</div>
         </div>
-        {props.view === "list" ? <div className="schedule-list">{props.schedules.length === 0 ? <EmptyState title="Kalendermu masih kosong" description="Tambahkan jadwal publikasi pertama untuk memulai." /> : [...props.schedules].sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`)).map((item) => <ScheduleRow key={item.id} item={item} edit={() => props.openModal(item)} remove={() => props.deleteItem(item)} publish={() => props.publish(item)} sync={() => props.sync(item)} />)}</div> : (
-          <div className={`calendar-grid ${props.view === "week" ? "week-grid" : ""}`}>
-            {daysLabel.map((label) => <div className="calendar-weekday" key={label}>{label}</div>)}
-            {calendarDays.map((date, index) => {
-              const dateSchedules = schedulesOn(date);
-              const dateId = dateKey(date);
-              const isExpanded = expandedDates.has(dateId);
-              const visibleSchedules = isExpanded ? dateSchedules : dateSchedules.slice(0, 3);
-              return <div key={dateKey(date)} className={`calendar-day ${props.view === "month" && date.getMonth() !== props.date.getMonth() ? "outside-month" : ""} ${dateKey(date) === dateKey(new Date()) ? "today" : ""} ${props.view === "week" ? `week-day-${index}` : ""}`}>
-                <div className="day-head"><span>{date.getDate()}</span>{props.view === "week" && <small>{new Intl.DateTimeFormat("id-ID", { month: "short" }).format(date)}</small>}<button type="button" aria-label={`Tambah jadwal ${dateKey(date)}`} onClick={() => props.openModal(undefined, dateKey(date))}>+</button></div>
-                <div className="day-events">
-                  {visibleSchedules.map((item) => (
-                    <div className="calendar-event-row" key={item.id}>
-                      <button type="button" className={`event-chip event-${item.status}`} onClick={() => props.openModal(item)}><span>{item.time}</span> {item.title}</button>
-                      <button type="button" className="event-delete" title="Hapus jadwal" aria-label={`Hapus jadwal ${item.title}`} onClick={() => props.deleteItem(item)} disabled={props.busy}><Icon name="trash" /></button>
-                    </div>
-                  ))}
-                  {dateSchedules.length > 3 && (
-                    <button type="button" className="more-events" aria-expanded={isExpanded} onClick={() => toggleDateExpanded(dateId)}>
-                      {isExpanded ? "Sembunyikan" : `+${dateSchedules.length - 3} lainnya`}
-                    </button>
-                  )}
-                </div>
-              </div>;
-            })}
-          </div>
+        <div className="platform-filter-bar" role="group" aria-label="Filter jadwal berdasarkan platform">
+          <button type="button" className={`platform-filter-chip ${platformFilter === "Semua platform" ? "selected" : ""}`} aria-pressed={platformFilter === "Semua platform"} onClick={() => changePlatformFilter("Semua platform")}>
+            Semua platform <span className="platform-filter-count">{props.schedules.length}</span>
+          </button>
+          {platforms.map((platform) => {
+            const count = props.schedules.filter((schedule) => platformLabel(schedule.platform) === platform).length;
+            return (
+              <button
+                type="button"
+                key={platform}
+                className={`platform-filter-chip ${platformFilter === platform ? "selected" : ""}`}
+                aria-pressed={platformFilter === platform}
+                onClick={() => changePlatformFilter(platform)}
+              >
+                <span className={`platform-filter-icon ${platformClass(platform)}`} aria-hidden="true"><PlatformIcon platform={platform} /></span>
+                {platform} <span className="platform-filter-count">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+        {props.view === "list" ? <div className="schedule-list">{filteredSchedules.length === 0 ? emptyScheduleState : [...filteredSchedules].sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`)).map((item) => <ScheduleRow key={item.id} item={item} edit={() => props.openModal(item)} remove={() => props.deleteItem(item)} publish={() => props.publish(item)} sync={() => props.sync(item)} />)}</div> : (
+          <>
+            <div className={`calendar-grid ${props.view === "week" ? "week-grid" : ""}`}>
+              {daysLabel.map((label) => <div className="calendar-weekday" key={label}>{label}</div>)}
+              {calendarDays.map((date, index) => {
+                const dateSchedules = schedulesOn(date);
+                const dateId = dateKey(date);
+                const isExpanded = expandedDates.has(dateId);
+                const visibleSchedules = isExpanded ? dateSchedules : dateSchedules.slice(0, 3);
+                return <div key={dateKey(date)} className={`calendar-day ${props.view === "month" && date.getMonth() !== props.date.getMonth() ? "outside-month" : ""} ${dateKey(date) === dateKey(new Date()) ? "today" : ""} ${props.view === "week" ? `week-day-${index}` : ""}`}>
+                  <div className="day-head"><span>{date.getDate()}</span>{props.view === "week" && <small>{new Intl.DateTimeFormat("id-ID", { month: "short" }).format(date)}</small>}<button type="button" aria-label={`Tambah jadwal ${dateKey(date)}`} onClick={() => props.openModal(undefined, dateKey(date))}>+</button></div>
+                  <div className="day-events">
+                    {visibleSchedules.map((item) => (
+                      <div className="calendar-event-row" key={item.id}>
+                        <button type="button" className={`event-chip event-${item.status}`} onClick={() => props.openModal(item)}>
+                          <span className={`event-platform-mark ${platformClass(item.platform)}`} aria-hidden="true"><PlatformIcon platform={platformLabel(item.platform)} /></span>
+                          <span className="event-time">{item.time}</span><span className="event-title">{item.title}</span>
+                        </button>
+                        <button type="button" className="event-delete" title="Hapus jadwal" aria-label={`Hapus jadwal ${item.title}`} onClick={() => props.deleteItem(item)} disabled={props.busy}><Icon name="trash" /></button>
+                      </div>
+                    ))}
+                    {dateSchedules.length > 3 && (
+                      <button type="button" className="more-events" aria-expanded={isExpanded} onClick={() => toggleDateExpanded(dateId)}>
+                        {isExpanded ? "Sembunyikan" : `+${dateSchedules.length - 3} lainnya`}
+                      </button>
+                    )}
+                  </div>
+                </div>;
+              })}
+            </div>
+          </>
         )}
       </section>
-      <section className="panel upcoming-panel"><div className="panel-heading"><div><p className="eyebrow">ANTREAN TERDEKAT</p><h2>Siap dipublikasikan</h2></div><span className="count-pill">{props.schedules.filter((item) => item.status === "scheduled").length} jadwal</span></div>
-        {props.schedules.filter((item) => item.status === "scheduled").length === 0 ? <p className="muted-copy">Tidak ada jadwal yang menunggu publikasi.</p> : props.schedules.filter((item) => item.status === "scheduled").slice(0, 3).map((item) => <ScheduleRow key={item.id} item={item} edit={() => props.openModal(item)} remove={() => props.deleteItem(item)} publish={() => props.publish(item)} sync={() => props.sync(item)} />)}
+      <section className="panel upcoming-panel"><div className="panel-heading"><div><p className="eyebrow">ANTREAN TERDEKAT</p><h2>Siap dipublikasikan</h2></div><span className="count-pill">{upcomingSchedules.length} jadwal</span></div>
+        {upcomingSchedules.length === 0 ? <p className="muted-copy">{platformFilter === "Semua platform" ? "Tidak ada jadwal yang menunggu publikasi." : `Tidak ada jadwal ${platformFilter} yang menunggu publikasi.`}</p> : upcomingSchedules.slice(0, 3).map((item) => <ScheduleRow key={item.id} item={item} edit={() => props.openModal(item)} remove={() => props.deleteItem(item)} publish={() => props.publish(item)} sync={() => props.sync(item)} />)}
       </section>
     </>
   );
@@ -867,7 +1051,7 @@ function IdeasPage(props: {
   );
 }
 
-function SettingsPage(props: { settings: Record<string, string>; databaseConnected: boolean; onSave: (event: FormEvent<HTMLFormElement>, profileImage: string) => void }) {
+function SettingsPage(props: { settings: Record<string, string>; databaseConnected: boolean; accessToken: string; onSave: (event: FormEvent<HTMLFormElement>, profileImage: string) => void }) {
   const { settings } = props;
   const [profileImage, setProfileImage] = useState(getProfileImage(settings.profileImage));
   const [photoError, setPhotoError] = useState("");
@@ -913,6 +1097,7 @@ function SettingsPage(props: { settings: Record<string, string>; databaseConnect
             </div>
           </section>
           <section className="panel settings-panel"><div className="settings-panel-heading"><span className="settings-icon"><Icon name="spark" /></span><div><h2>Nama workspace</h2><p>Nama ini akan tampil di navigasi dan header seluruh halaman.</p></div></div><div className="settings-fields"><label className="field field-wide"><span>Nama workspace</span><input required maxLength={60} name="workspaceName" defaultValue={settings.workspaceName || "Kundrew Studio"} placeholder="Contoh: Studio Kreatif" /></label></div></section>
+          <InstagramConnectionSettings accessToken={props.accessToken} />
           <section className="panel settings-panel"><div className="settings-panel-heading"><span className="settings-icon settings-icon-pink">◎</span><div><h2>Platform tersedia</h2><p>Pilih salah satu saat menambahkan ide, jadwal, atau laporan.</p></div></div><div className="platform-listing">{platforms.map((platform) => <div className="platform-listing-row" key={platform}><span className={`platform-avatar ${platformClass(platform)}`}><PlatformIcon platform={platform} /></span><span><strong>{platform}</strong><small>Tersedia untuk konten workspace</small></span></div>)}</div></section>
           <div className="settings-save"><button className="button button-primary" type="submit" disabled={Boolean(photoError)}>Simpan perubahan <Icon name="arrow" /></button></div>
         </div>
@@ -924,6 +1109,222 @@ function SettingsPage(props: { settings: Record<string, string>; databaseConnect
 
 function EmptyState({ title, description }: { title: string; description: string }) {
   return <div className="empty-state"><span className="empty-state-icon">✳</span><strong>{title}</strong><p>{description}</p></div>;
+}
+
+function InstagramMetric({ label, value }: { label: string; value: number | null }) {
+  return <div className="instagram-metric"><small>{label}</small><strong>{formatNumber(value)}</strong></div>;
+}
+
+function formattedSyncTime(value: string | null) {
+  if (!value) return "Belum pernah disinkronkan";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Waktu sinkronisasi tidak diketahui";
+  return `Diperbarui ${new Intl.DateTimeFormat("id-ID", { dateStyle: "medium", timeStyle: "short" }).format(date)}`;
+}
+
+function InstagramInsightsPanel({ accessToken }: { accessToken: string }) {
+  const [connected, setConnected] = useState<boolean | null>(null);
+  const [connection, setConnection] = useState<InstagramConnection | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+
+  const syncNow = useCallback(async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const fresh = await syncInstagram(accessToken);
+      setConnection(fresh);
+      setConnected(true);
+    } catch (syncError) {
+      setError(syncError instanceof Error ? syncError.message : "Insight Instagram tidak dapat disinkronkan.");
+    } finally {
+      setBusy(false);
+    }
+  }, [accessToken]);
+
+  const loadInsights = useCallback(async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const status = await getInstagramStatus(accessToken);
+      setConnected(status.connected);
+      if (!status.connected) {
+        setConnection(null);
+        return;
+      }
+      if (!status.connection) throw new Error("Status koneksi Instagram dari server tidak valid.");
+      setConnection(status.connection);
+      const lastSync = status.connection.lastSyncedAt ? Date.parse(status.connection.lastSyncedAt) : Number.NaN;
+      if (!Number.isFinite(lastSync) || Date.now() - lastSync > 12 * 60 * 60 * 1000) {
+        const fresh = await syncInstagram(accessToken);
+        setConnection(fresh);
+      }
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Insight Instagram tidak dapat dimuat.");
+    } finally {
+      setBusy(false);
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    void Promise.resolve().then(loadInsights);
+  }, [loadInsights]);
+
+  return (
+    <section className="panel instagram-insights-card" aria-labelledby="instagram-insights-title">
+      <div className="panel-heading">
+        <div><p className="eyebrow">INSIGHT OTOMATIS</p><h2 id="instagram-insights-title">Instagram</h2></div>
+        {connected && <button className="button button-quiet" type="button" onClick={() => { void syncNow(); }} disabled={busy}>{busy ? "Memuat..." : "Sinkronkan"}</button>}
+      </div>
+      {busy && !connection && <div className="instagram-status"><span className="spinner" /> Memeriksa koneksi Instagram...</div>}
+      {error && <p className="instagram-error" role="alert">{error}</p>}
+      {!busy && connected === false && (
+        <div className="instagram-empty">
+          <p>Hubungkan akun Instagram Professional untuk melihat insight akun otomatis.</p>
+          <Link className="button button-quiet" href="/pengaturan">Atur koneksi</Link>
+        </div>
+      )}
+      {connection && (
+        <>
+          <div className="instagram-account">
+            <span className={`platform-avatar ${platformClass("instagram")}`}><PlatformIcon platform="Instagram" /></span>
+            <span><strong>@{connection.username}</strong><small>{connection.accountType || "Instagram Professional"} · {formatNumber(connection.profile.mediaCount)} konten · {formattedSyncTime(connection.lastSyncedAt)}</small></span>
+            {busy && <span className="instagram-sync-indicator"><i /> Memperbarui</span>}
+          </div>
+          <div className="instagram-metrics">
+            <InstagramMetric label="Followers" value={connection.profile.followers} />
+            <InstagramMetric label="Jangkauan harian" value={connection.insights.reach} />
+            <InstagramMetric label="Akun berinteraksi" value={connection.insights.accountsEngaged} />
+            <InstagramMetric label="Total interaksi" value={connection.insights.totalInteractions} />
+          </div>
+          <p className="instagram-insights-note">Data 24 jam terakhir dari Meta; sebagian metrik dapat terlambat hingga 48 jam atau tidak tersedia untuk akun tertentu.</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function InstagramConnectionSettings({ accessToken }: { accessToken: string }) {
+  const [configured, setConfigured] = useState(false);
+  const [connected, setConnected] = useState<boolean | null>(null);
+  const [connection, setConnection] = useState<InstagramConnection | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const loadConnection = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const status = await getInstagramStatus(accessToken);
+      setConfigured(status.configured);
+      setConnected(status.connected);
+      setConnection(status.connection);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Status Instagram tidak dapat dimuat.");
+    } finally {
+      setLoading(false);
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    void Promise.resolve().then(loadConnection);
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get("instagram");
+    if (result === "connected") void Promise.resolve().then(() => setNotice("Akun Instagram berhasil dihubungkan."));
+    if (result === "cancelled") void Promise.resolve().then(() => setNotice("Proses koneksi Instagram dibatalkan."));
+    if (result === "failed") void Promise.resolve().then(() => setError("Koneksi Instagram gagal. Periksa konfigurasi dan izin Meta."));
+    if (result) {
+      url.searchParams.delete("instagram");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [loadConnection]);
+
+  const connect = async () => {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/integrations/instagram/connect", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const payload = await readApiResponse(response, "Koneksi Instagram tidak dapat dimulai.");
+      const data = isObjectRecord(payload.data) ? payload.data : {};
+      if (typeof data.authorizationUrl !== "string") throw new Error("Tautan otorisasi Instagram tidak valid.");
+      window.location.assign(data.authorizationUrl);
+    } catch (connectError) {
+      setError(connectError instanceof Error ? connectError.message : "Koneksi Instagram tidak dapat dimulai.");
+      setBusy(false);
+    }
+  };
+
+  const syncNow = async () => {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      setConnection(await syncInstagram(accessToken));
+      setConnected(true);
+      setNotice("Insight Instagram berhasil diperbarui.");
+    } catch (syncError) {
+      setError(syncError instanceof Error ? syncError.message : "Insight Instagram tidak dapat disinkronkan.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/integrations/instagram", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      await readApiResponse(response, "Akun Instagram tidak dapat diputus.");
+      setConnection(null);
+      setConnected(false);
+      setNotice("Akun Instagram berhasil diputus.");
+    } catch (disconnectError) {
+      setError(disconnectError instanceof Error ? disconnectError.message : "Akun Instagram tidak dapat diputus.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="panel settings-panel instagram-connection-panel">
+      <div className="settings-panel-heading">
+        <span className="settings-icon settings-icon-instagram">◎</span>
+        <div><h2>Hubungkan Instagram</h2><p>Sinkronkan insight akun Instagram Professional milikmu.</p></div>
+      </div>
+      {loading ? <p className="instagram-status"><span className="spinner" /> Memeriksa koneksi...</p> : (
+        <>
+          {connected && connection ? (
+            <div className="instagram-settings-account">
+              <span><strong>@{connection.username}</strong><small>{connection.accountType || "Instagram Professional"} · {formatNumber(connection.profile.mediaCount)} konten · {formattedSyncTime(connection.lastSyncedAt)}</small></span>
+              <div className="instagram-settings-actions">
+                <button className="button button-quiet" type="button" onClick={() => { void syncNow(); }} disabled={busy}>{busy ? "Memuat..." : "Sinkronkan"}</button>
+                <button className="button button-quiet instagram-disconnect" type="button" onClick={() => { void disconnect(); }} disabled={busy}>Putuskan</button>
+              </div>
+            </div>
+          ) : (
+            <div className="instagram-connect-copy">
+              <p>{configured ? "Masuk ke Instagram dan izinkan akses insight untuk menghubungkan akun." : "Konfigurasi Meta App dan environment variables server diperlukan sebelum akun dapat dihubungkan."}</p>
+              <button className="button button-primary" type="button" onClick={() => { void connect(); }} disabled={!configured || busy}>
+                {busy ? "Menghubungkan..." : "Hubungkan akun Instagram"}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+      {error && <p className="instagram-error" role="alert">{error}</p>}
+      {notice && <p className="instagram-success" role="status">{notice}</p>}
+    </section>
+  );
 }
 
 function RecordModal({ modal, busy, onClose, onSubmit }: { modal: Exclude<ModalState, null>; busy: boolean; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {

@@ -1,5 +1,6 @@
 import { handleApiError, InputError } from "@/lib/api";
 import { getPool, tableName } from "@/lib/db";
+import { requireUser } from "@/lib/auth";
 
 const platforms = ["Instagram", "TikTok", "Threads", "YouTube"];
 
@@ -15,14 +16,15 @@ function platformLabel(value: unknown): string {
 
 export async function GET(request: Request) {
   try {
+    const user = await requireUser(request);
     const platform = new URL(request.url).searchParams.get("platform");
     if (platform && !platforms.includes(platform)) throw new InputError("Filter platform tidak valid.");
 
     const { rows } = await getPool().query(
       `SELECT * FROM ${tableName("reports")}
-       ${platform ? 'WHERE LOWER("platform") = LOWER($1)' : ""}
+       WHERE user_id = $1 ${platform ? 'AND LOWER("platform") = LOWER($2)' : ""}
        ORDER BY LOWER("platform") ASC, "date" DESC NULLS LAST, id DESC`,
-      platform ? [platform] : [],
+      platform ? [user.id, platform] : [user.id],
     );
     const headers = ["No.", "ID Laporan", "Platform", "Tanggal Publikasi", "Nama Konten", "Format", "Followers", "Tayangan", "Jangkauan", "Engagement", "Periode", "Deskripsi"];
     const lines = [

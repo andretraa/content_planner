@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import type { PoolClient } from "pg";
 import { handleApiError, notFound, readObject, text } from "@/lib/api";
 import { getPool, tableName } from "@/lib/db";
+import { requireUser } from "@/lib/auth";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   let client: PoolClient | undefined;
   try {
+    const user = await requireUser(request);
     client = await getPool().connect();
     const { id } = await context.params;
     if (!/^\d+$/.test(id)) return notFound("Ide tidak ditemukan.");
@@ -14,18 +16,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const time = text(body, "time", { fallback: "14:00" });
     await client.query("BEGIN");
     const schedule = await client.query(
-      `INSERT INTO ${tableName("schedules")} (platform, tag, title, date, time, status, description, idea_id)
-       SELECT LOWER(platform), COALESCE(NULLIF(category, ''), INITCAP(platform)), title, $1, $2, 'scheduled', description, id
-       FROM ${tableName("ideas")} WHERE id = $3 RETURNING *`,
-      [date, time, id],
+      `INSERT INTO ${tableName("schedules")} (platform, tag, title, date, time, status, description, idea_id, user_id)
+       SELECT LOWER(platform), COALESCE(NULLIF(category, ''), INITCAP(platform)), title, $1, $2, 'scheduled', description, id, $4
+       FROM ${tableName("ideas")} WHERE id = $3 AND user_id = $4 RETURNING *`,
+      [date, time, id, user.id],
     );
     if (!schedule.rows[0]) {
       await client.query("ROLLBACK");
       return notFound("Ide tidak ditemukan.");
     }
     await client.query(
-      `UPDATE ${tableName("ideas")} SET "column" = 'ready_to_shoot', scheduled_note = $1 WHERE id = $2`,
-      [`Scheduled for ${date}, ${time}`, id],
+      `UPDATE ${tableName("ideas")} SET "column" = 'ready_to_shoot', scheduled_note = $1 WHERE id = $2 AND user_id = $3`,
+      [`Scheduled for ${date}, ${time}`, id, user.id],
     );
     await client.query("COMMIT");
     return NextResponse.json({ status: "success", message: "Ide berhasil dijadwalkan.", data: schedule.rows[0] }, { status: 201 });

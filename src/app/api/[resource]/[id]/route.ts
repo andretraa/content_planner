@@ -4,6 +4,7 @@ import { getPool, tableName } from "@/lib/db";
 import { readObject } from "@/lib/api";
 import { InputError } from "@/lib/api";
 import { text } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 
 type Resource = "reports" | "schedules" | "ideas";
 
@@ -61,6 +62,7 @@ function updateValues(resource: Resource, body: Record<string, unknown>) {
 
 export async function PUT(request: Request, context: { params: Promise<{ resource: string; id: string }> }) {
   try {
+    const user = await requireUser(request);
     const { resource: key, id } = await context.params;
     const resource = getResource(key);
     if (!/^\d+$/.test(id)) return notFound("Data tidak ditemukan.");
@@ -68,8 +70,8 @@ export async function PUT(request: Request, context: { params: Promise<{ resourc
     const columns = Object.keys(values);
     const setters = columns.map((column, index) => `"${column}" = $${index + 1}`).join(", ");
     const result = await getPool().query(
-      `UPDATE ${tableName(resource)} SET ${setters} WHERE id = $${columns.length + 1} RETURNING *`,
-      [...Object.values(values), id],
+      `UPDATE ${tableName(resource)} SET ${setters} WHERE id = $${columns.length + 1} AND user_id = $${columns.length + 2} RETURNING *`,
+      [...Object.values(values), id, user.id],
     );
     if (!result.rows[0]) return notFound("Data tidak ditemukan.");
     return NextResponse.json({ status: "success", message: "Data berhasil diperbarui.", data: result.rows[0] });
@@ -78,12 +80,13 @@ export async function PUT(request: Request, context: { params: Promise<{ resourc
   }
 }
 
-export async function DELETE(_request: Request, context: { params: Promise<{ resource: string; id: string }> }) {
+export async function DELETE(request: Request, context: { params: Promise<{ resource: string; id: string }> }) {
   try {
+    const user = await requireUser(request);
     const { resource: key, id } = await context.params;
     const resource = getResource(key);
     if (!/^\d+$/.test(id)) return notFound("Data tidak ditemukan.");
-    const result = await getPool().query(`DELETE FROM ${tableName(resource)} WHERE id = $1`, [id]);
+    const result = await getPool().query(`DELETE FROM ${tableName(resource)} WHERE id = $1 AND user_id = $2`, [id, user.id]);
     if (!result.rowCount) return notFound("Data tidak ditemukan.");
     return NextResponse.json({ status: "success", message: "Data berhasil dihapus." });
   } catch (error) {

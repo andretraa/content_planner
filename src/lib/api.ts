@@ -14,6 +14,27 @@ export class DatabaseConfigurationError extends Error {
   }
 }
 
+export class SupabaseAuthConfigurationError extends Error {
+  constructor() {
+    super("Supabase Auth belum dikonfigurasi. Tambahkan NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+    this.name = "SupabaseAuthConfigurationError";
+  }
+}
+
+export class AuthenticationError extends Error {
+  constructor() {
+    super("Sesi tidak valid atau sudah berakhir. Silakan masuk kembali.");
+    this.name = "AuthenticationError";
+  }
+}
+
+export class IntegrationError extends Error {
+  constructor(message: string, readonly status: 400 | 409 | 502 | 503) {
+    super(message);
+    this.name = "IntegrationError";
+  }
+}
+
 export async function readObject(request: Request): Promise<Record<string, unknown>> {
   let value: unknown;
   try {
@@ -63,6 +84,15 @@ export function handleApiError(error: unknown) {
   }
   if (error instanceof DatabaseConfigurationError) {
     return NextResponse.json({ status: "error", message: error.message }, { status: 503 });
+  }
+  if (error instanceof SupabaseAuthConfigurationError) {
+    return NextResponse.json({ status: "error", message: error.message }, { status: 503 });
+  }
+  if (error instanceof AuthenticationError) {
+    return NextResponse.json({ status: "error", message: error.message }, { status: 401 });
+  }
+  if (error instanceof IntegrationError) {
+    return NextResponse.json({ status: "error", message: error.message }, { status: error.status });
   }
   console.error("API request failed:", error);
   return NextResponse.json(

@@ -41,7 +41,9 @@ export function getPool(): Pool {
   return pool;
 }
 
-export function tableName(name: "reports" | "schedules" | "ideas"): string {
+export function tableName(
+  name: "reports" | "schedules" | "ideas" | "instagram_connections" | "instagram_oauth_states",
+): string {
   const schema = process.env.DB_SCHEMA ?? "public";
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schema)) {
     throw new Error("DB_SCHEMA hanya boleh berisi huruf, angka, dan underscore.");

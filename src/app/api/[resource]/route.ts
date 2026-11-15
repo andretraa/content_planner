@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPool, tableName } from "@/lib/db";
 import { handleApiError, InputError, nullableId, readObject, text } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
 
 type Resource = "reports" | "schedules" | "ideas";
 
@@ -65,9 +66,10 @@ function createValues(resource: Resource, body: Record<string, unknown>) {
 
 export async function GET(_request: Request, context: { params: Promise<{ resource: string }> }) {
   try {
+    const user = await requireUser(_request);
     const { resource: key } = await context.params;
     const resource = getResource(key);
-    const result = await getPool().query(`SELECT * FROM ${tableName(resource)} ORDER BY id ASC`);
+    const result = await getPool().query(`SELECT * FROM ${tableName(resource)} WHERE user_id = $1 ORDER BY id ASC`, [user.id]);
     return NextResponse.json({ status: "success", data: result.rows });
   } catch (error) {
     return handleApiError(error);
@@ -76,9 +78,10 @@ export async function GET(_request: Request, context: { params: Promise<{ resour
 
 export async function POST(request: Request, context: { params: Promise<{ resource: string }> }) {
   try {
+    const user = await requireUser(request);
     const { resource: key } = await context.params;
     const resource = getResource(key);
-    const values = createValues(resource, await readObject(request));
+    const values = { ...createValues(resource, await readObject(request)), user_id: user.id };
     const columns = Object.keys(values);
     const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
     const result = await getPool().query(
