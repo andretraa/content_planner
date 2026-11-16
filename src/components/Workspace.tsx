@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { ReactNode } from "react";
 import AuthGate from "@/components/AuthGate";
 import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 
@@ -76,6 +77,30 @@ const emptyIdea = { title: "", description: "", platform: "Instagram", category:
 function platformLabel(value: unknown) {
   const normalized = String(value ?? "Instagram").trim().toLowerCase();
   return platformLabels[normalized] ?? normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function linkifyDescription(description: string): ReactNode {
+  const nodes: ReactNode[] = [];
+  const pattern = /https?:\/\/[^\s<>"']+/gi;
+  let previousIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(description)) !== null) {
+    const rawUrl = match[0];
+    const url = rawUrl.replace(/[.,!?;:)\]}]+$/g, "");
+    const start = match.index;
+    if (start > previousIndex) nodes.push(description.slice(previousIndex, start));
+    if (url) {
+      nodes.push(<a key={start} href={url} target="_blank" rel="noopener noreferrer">{url}</a>);
+      if (url.length < rawUrl.length) nodes.push(rawUrl.slice(url.length));
+    } else {
+      nodes.push(rawUrl);
+    }
+    previousIndex = start + rawUrl.length;
+  }
+
+  if (previousIndex < description.length) nodes.push(description.slice(previousIndex));
+  return nodes;
 }
 
 function formatNumber(value: unknown) {
@@ -1043,7 +1068,7 @@ function IdeasPage(props: {
           <div className="kanban-column-heading"><span className={`column-dot dot-${column.color}`} /><h2>{column.label}</h2><span className="count-pill">{items.length}</span><button type="button" title={`Tambah di ${column.label}`} onClick={() => props.openModal(undefined, column.id)}>+</button></div>
           <div className="idea-stack">{items.length === 0 ? <button className="empty-column" type="button" onClick={() => props.openModal(undefined, column.id)}>Belum ada ide di sini <span>+ Tambahkan</span></button> : items.map((idea) => <article className="idea-card" key={idea.id}>
             <div className="idea-card-top"><span className={platformClass(idea.platform)}><PlatformIcon platform={platformLabel(idea.platform)} />{platformLabel(idea.platform)}</span><button type="button" className="idea-edit" onClick={() => props.openModal(idea)} aria-label="Edit ide"><Icon name="edit" /></button></div>
-            <h3>{idea.title}</h3><p>{idea.description || "Tambahkan catatan untuk mengembangkan ide ini."}</p>
+            <h3>{idea.title}</h3><p>{idea.description ? linkifyDescription(String(idea.description)) : "Tambahkan catatan untuk mengembangkan ide ini."}</p>
             <div className="idea-card-meta"><span>{idea.category || "General"}</span>{idea.scheduled_note && <span><Icon name="calendar" /> Terjadwal</span>}</div>
             <div className="idea-card-actions">
               <select aria-label={`Pindahkan ide ${idea.title}`} value={String(idea.column)} onChange={(event) => props.move(idea, event.target.value as IdeaColumn)} disabled={props.busy}>
