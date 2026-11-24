@@ -45,6 +45,16 @@ CREATE INDEX IF NOT EXISTS schedules_user_id_idx ON public.schedules (user_id);
 CREATE INDEX IF NOT EXISTS ideas_user_id_idx ON public.ideas (user_id);
 CREATE INDEX IF NOT EXISTS reports_user_id_idx ON public.reports (user_id);
 
+CREATE TABLE IF NOT EXISTS public.monthly_content_targets (
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  target_month VARCHAR(7) NOT NULL
+    CHECK (target_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
+  platform VARCHAR(255) NOT NULL DEFAULT 'all'
+    CHECK (platform IN ('all', 'instagram', 'tiktok', 'threads', 'youtube')),
+  target_count INTEGER NOT NULL CHECK (target_count > 0),
+  PRIMARY KEY (user_id, target_month, platform)
+);
+
 CREATE TABLE IF NOT EXISTS public.instagram_connections (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   instagram_user_id TEXT NOT NULL,

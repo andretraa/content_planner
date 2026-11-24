@@ -42,7 +42,7 @@ export function getPool(): Pool {
 }
 
 export function tableName(
-  name: "reports" | "schedules" | "ideas" | "instagram_connections" | "instagram_oauth_states",
+  name: "reports" | "schedules" | "ideas" | "monthly_content_targets" | "instagram_connections" | "instagram_oauth_states",
 ): string {
   const schema = process.env.DB_SCHEMA ?? "public";
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schema)) {

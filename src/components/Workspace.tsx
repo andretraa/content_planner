@@ -10,6 +10,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 type Page = "reports" | "planner" | "ideas" | "settings";
 type RecordItem = Record<string, string | number | null | undefined> & { id: string | number };
 type IdeaColumn = "ideas" | "in_progress" | "ready_to_shoot" | "completed";
+type TargetPlatform = "all" | "instagram" | "tiktok" | "threads" | "youtube";
 type ModalState = { type: "report" | "schedule" | "idea"; item?: RecordItem; column?: IdeaColumn; date?: string } | null;
 type Collection = "reports" | "schedules" | "ideas";
 type InstagramConnection = {
@@ -29,6 +30,8 @@ type ConfirmationState =
   | { type: "save"; collection: Collection; id: string | number; payload: Record<string, FormDataEntryValue>; title: string }
   | { type: "delete"; collection: Collection; item: RecordItem }
   | null;
+type ResearchPlatform = "instagram" | "tiktok" | "threads" | "youtube";
+type ResearchIdea = { title: string; description: string; platform: ResearchPlatform; format: string; whyItWorks: string };
 
 const navigation: { id: Page; label: string; href: string; hint: string }[] = [
   { id: "reports", label: "Laporan Sosmed", href: "/laporan-sosmed", hint: "Analitik & performa" },
@@ -38,6 +41,13 @@ const navigation: { id: Page; label: string; href: string; hint: string }[] = [
 ];
 
 const platforms = ["Instagram", "TikTok", "Threads", "YouTube"];
+const targetPlatforms: { id: TargetPlatform; label: string }[] = [
+  { id: "all", label: "Semua platform" },
+  { id: "instagram", label: "Instagram" },
+  { id: "tiktok", label: "TikTok" },
+  { id: "threads", label: "Threads" },
+  { id: "youtube", label: "YouTube" },
+];
 const reportsPerPage = 7;
 const platformLabels: Record<string, string> = {
   instagram: "Instagram",
@@ -120,6 +130,21 @@ function dateKey(date: Date) {
   return local.toISOString().slice(0, 10);
 }
 
+function currentWeekRange(referenceDate: Date) {
+  const start = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return { start: dateKey(start), end: dateKey(end) };
+}
+
+function isReportInPeriod(report: RecordItem, period: string, weekStart: string, weekEnd: string, month: string) {
+  if (period === "semua") return true;
+  const uploadDate = String(report.date ?? "").slice(0, 10);
+  if (period === "bulanan") return uploadDate.slice(0, 7) === month;
+  return uploadDate >= weekStart && uploadDate <= weekEnd;
+}
+
 async function readApiResponse(response: Response, fallback: string): Promise<Record<string, unknown>> {
   const body = await response.text();
   let result: unknown;
@@ -148,6 +173,10 @@ async function readApiResponse(response: Response, fallback: string): Promise<Re
 
 function platformClass(value: unknown) {
   return `platform platform-${String(value ?? "instagram").toLowerCase()}`;
+}
+
+function isResearchPlatform(value: unknown): value is ResearchPlatform {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(platformLabels, value);
 }
 
 function subscribeToSettings(callback: () => void, key: string) {
@@ -319,6 +348,7 @@ function Icon({ name }: { name: string }) {
     chart: "M4 19V5m0 14h16M8 15v-4m4 4V7m4 8v-6",
     search: "m20 20-4.2-4.2M18 10.5a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z",
     download: "M12 3v12m0 0 4-4m-4 4-4-4M5 18v3h14v-3",
+    refresh: "M20 7v5h-5M4 17v-5h5m-3.1-3A7 7 0 0 1 18 7l2 5M4 12l2 5a7 7 0 0 0 12.1-2",
     edit: "m15 5 4 4M4 20l4-.8L19 8a2.1 2.1 0 0 0-3-3L5 16l-1 4Z",
     trash: "M4 7h16M10 11v6m4-6v6M6 7l1 14h10l1-14M9 7V4h6v3",
     close: "m6 6 12 12M18 6 6 18",
@@ -349,12 +379,19 @@ export default function Workspace({ page }: { page: Page }) {
   const [reports, setReports] = useState<RecordItem[]>([]);
   const [schedules, setSchedules] = useState<RecordItem[]>([]);
   const [ideas, setIdeas] = useState<RecordItem[]>([]);
+  const [goalMonth, setGoalMonth] = useState(() => dateKey(new Date()).slice(0, 7));
+  const [goalPlatform, setGoalPlatform] = useState<TargetPlatform>("all");
+  const [monthlyTarget, setMonthlyTarget] = useState<number | null>(null);
+  const [monthlyTargetLoading, setMonthlyTargetLoading] = useState(true);
+  const monthlyCountSnapshot = useRef<{ month: string; platform: TargetPlatform; count: number; target: number | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [syncingData, setSyncingData] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [modal, setModal] = useState<ModalState>(null);
   const [confirmation, setConfirmation] = useState<ConfirmationState>(null);
+  const monthlyGoalReached = useRef(false);
   const [query, setQuery] = useState("");
   const [platformFilter, setPlatformFilter] = useState("Semua platform");
   const [period, setPeriod] = useState("mingguan");
@@ -382,6 +419,10 @@ export default function Workspace({ page }: { page: Page }) {
       setReports([]);
       setSchedules([]);
       setIdeas([]);
+      monthlyCountSnapshot.current = null;
+      monthlyGoalReached.current = false;
+      setMonthlyTarget(null);
+      setMonthlyTargetLoading(true);
       setLoading(Boolean(token));
       if (token) setError("");
       setAccessToken(session?.access_token ?? null);
@@ -408,31 +449,71 @@ export default function Workspace({ page }: { page: Page }) {
     };
   }, [authClient]);
 
-  const loadData = useCallback(async () => {
-    if (!accessToken) return;
+  const loadData = useCallback(async (): Promise<boolean> => {
+    if (!accessToken) return false;
     try {
-      const responses = await Promise.all(["reports", "schedules", "ideas"].map((item) => fetch(`/api/${item}`, {
+      const endpoints = [
+        "/api/reports",
+        "/api/schedules",
+        "/api/ideas",
+        `/api/monthly-target?month=${encodeURIComponent(goalMonth)}&platform=${encodeURIComponent(goalPlatform)}`,
+      ];
+      const responses = await Promise.all(endpoints.map((endpoint) => fetch(endpoint, {
         cache: "no-store",
         headers: { Authorization: `Bearer ${accessToken}` },
       })));
-      const payloads = await Promise.all(
-        responses.map(async (response) => {
+      const payloads = await Promise.all(responses.map(async (response) => {
           const json = await readApiResponse(response, "Data tidak dapat dimuat.");
-          if (!Array.isArray(json.data)) throw new Error("Format data dari server tidak valid.");
-          return json.data as RecordItem[];
-        }),
+          return json;
+        }));
+      if (activeToken.current !== accessToken) return false;
+      const [reportData, scheduleData, ideaData, targetData] = payloads.map((payload) => payload.data);
+      if (!Array.isArray(reportData) || !Array.isArray(scheduleData) || !Array.isArray(ideaData)) {
+        throw new Error("Format data dari server tidak valid.");
+      }
+      if (!isObjectRecord(targetData) || targetData.month !== goalMonth || targetData.platform !== goalPlatform) {
+        throw new Error("Format target bulanan dari server tidak valid.");
+      }
+      const targetCount = targetData.targetCount;
+      if (targetCount !== null && (typeof targetCount !== "number" || !Number.isSafeInteger(targetCount))) {
+        throw new Error("Nilai target bulanan dari server tidak valid.");
+      }
+      const monthlyReports = (reportData as RecordItem[]).filter((report) =>
+        String(report.date ?? "").slice(0, 7) === goalMonth
+        && (goalPlatform === "all" || String(report.platform ?? "").toLowerCase() === goalPlatform),
       );
-      if (activeToken.current !== accessToken) return;
-      setReports(payloads[0]);
-      setSchedules(payloads[1]);
-      setIdeas(payloads[2]);
+      const previousSnapshot = monthlyCountSnapshot.current;
+      if (
+        previousSnapshot?.month === goalMonth
+        && previousSnapshot.platform === goalPlatform
+        && previousSnapshot.target !== null
+        && previousSnapshot.target === targetCount
+        && previousSnapshot.count < targetCount
+        && monthlyReports.length >= targetCount
+      ) {
+        monthlyGoalReached.current = true;
+        const platformLabel = targetPlatforms.find((platform) => platform.id === goalPlatform)?.label ?? "Semua platform";
+        const monthLabel = new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" })
+          .format(new Date(`${goalMonth}-01T00:00:00`));
+        setNotice(`Target ${platformLabel} tercapai! ${monthlyReports.length} konten sudah tercatat untuk ${monthLabel}.`);
+      }
+      monthlyCountSnapshot.current = { month: goalMonth, platform: goalPlatform, count: monthlyReports.length, target: targetCount };
+      setReports(reportData as RecordItem[]);
+      setSchedules(scheduleData as RecordItem[]);
+      setIdeas(ideaData as RecordItem[]);
+      setMonthlyTarget(targetCount);
+      return true;
     } catch (loadError) {
-      if (activeToken.current !== accessToken) return;
+      if (activeToken.current !== accessToken) return false;
       setError(loadError instanceof Error ? loadError.message : "Data tidak dapat dimuat.");
+      return false;
     } finally {
-      if (activeToken.current === accessToken) setLoading(false);
+      if (activeToken.current === accessToken) {
+        setLoading(false);
+        setMonthlyTargetLoading(false);
+      }
     }
-  }, [accessToken]);
+  }, [accessToken, goalMonth, goalPlatform]);
 
   useEffect(() => {
     if (!authLoading && accessToken) void Promise.resolve().then(loadData);
@@ -455,6 +536,30 @@ export default function Workspace({ page }: { page: Page }) {
     });
     const result = await readApiResponse(response, "Permintaan gagal.");
     return result;
+  };
+
+  const setActionNotice = (message: string) => {
+    if (monthlyGoalReached.current) {
+      monthlyGoalReached.current = false;
+      return;
+    }
+    setNotice(message);
+  };
+
+  const syncData = () => {
+    setSyncingData(true);
+    void runAction(async () => {
+      const loaded = await loadData();
+      if (loaded) setActionNotice("Data terbaru berhasil disinkronkan.");
+    }).finally(() => setSyncingData(false));
+  };
+
+  const saveMonthlyTarget = async (targetCount: number) => {
+    await runAction(async () => {
+      await callApi("/api/monthly-target", "PUT", { month: goalMonth, platform: goalPlatform, targetCount });
+      await loadData();
+      setActionNotice("Target bulanan berhasil disimpan.");
+    });
   };
 
   const addScheduleToReports = async (scheduleId: string | number) => {
@@ -538,7 +643,7 @@ export default function Workspace({ page }: { page: Page }) {
       }
       await loadData();
       setModal(null);
-      setNotice("Perubahan berhasil disimpan.");
+      setActionNotice("Perubahan berhasil disimpan.");
     });
   };
 
@@ -553,7 +658,7 @@ export default function Workspace({ page }: { page: Page }) {
       if (action.type === "delete") {
         await callApi(`/api/${action.collection}/${action.item.id}`, "DELETE");
         await loadData();
-        setNotice("Data berhasil dihapus.");
+        setActionNotice("Data berhasil dihapus.");
         return;
       }
 
@@ -563,7 +668,7 @@ export default function Workspace({ page }: { page: Page }) {
       }
       await loadData();
       setModal(null);
-      setNotice("Perubahan berhasil disimpan.");
+      setActionNotice("Perubahan berhasil disimpan.");
     });
     setConfirmation(null);
   };
@@ -573,7 +678,7 @@ export default function Workspace({ page }: { page: Page }) {
       await addScheduleToReports(schedule.id);
       await callApi(`/api/schedules/${schedule.id}`, "PUT", { ...schedule, status: "published" });
       await loadData();
-      setNotice("Jadwal diterbitkan dan otomatis ditambahkan ke laporan.");
+      setActionNotice("Jadwal diterbitkan dan otomatis ditambahkan ke laporan.");
     });
   };
 
@@ -581,7 +686,7 @@ export default function Workspace({ page }: { page: Page }) {
     void runAction(async () => {
       await addScheduleToReports(schedule.id);
       await loadData();
-      setNotice("Jadwal berhasil disinkronkan ke laporan.");
+      setActionNotice("Jadwal berhasil disinkronkan ke laporan.");
     });
   };
 
@@ -596,26 +701,41 @@ export default function Workspace({ page }: { page: Page }) {
     void runAction(async () => {
       await callApi(`/api/ideas/${idea.id}/send-to-planner`, "POST", {});
       await loadData();
-      setNotice("Ide berhasil ditambahkan ke Content Planner.");
+      setActionNotice("Ide berhasil ditambahkan ke Content Planner.");
     });
+  };
+
+  const saveResearchIdea = async (idea: ResearchIdea) => {
+    await callApi("/api/ideas", "POST", {
+      title: idea.title,
+      description: `${idea.description}\n\nFormat: ${idea.format}\nAlasan ide: ${idea.whyItWorks}`,
+      platform: idea.platform,
+      category: "Ide AI",
+      column: "ideas",
+    });
+    await loadData();
+    setActionNotice("Ide AI berhasil disimpan.");
   };
 
   const syncIdea = (idea: RecordItem) => {
     void runAction(async () => {
       await callApi(`/api/reports/from-idea/${idea.id}`, "POST", {});
       await loadData();
-      setNotice("Ide berhasil disinkronkan ke laporan.");
+      setActionNotice("Ide berhasil disinkronkan ke laporan.");
     });
   };
 
+  const today = new Date();
+  const { start: weekStart, end: weekEnd } = currentWeekRange(today);
+  const currentMonth = dateKey(today).slice(0, 7);
   const filteredReports = useMemo(() => {
     const normalized = query.toLowerCase();
     return [...reports]
       .sort((a, b) => String(b.date ?? "").localeCompare(String(a.date ?? "")) || Number(b.id) - Number(a.id))
       .filter((report) => (platformFilter === "Semua platform" || platformLabel(report.platform) === platformFilter))
       .filter((report) => `${report.title} ${report.description} ${report.platform} ${report.tag}`.toLowerCase().includes(normalized))
-      .filter((report) => period === "semua" || report.period === period);
-  }, [period, platformFilter, query, reports]);
+      .filter((report) => isReportInPeriod(report, period, weekStart, weekEnd, currentMonth));
+  }, [currentMonth, period, platformFilter, query, reports, weekEnd, weekStart]);
 
   const active = navigation.find((item) => item.id === page)!;
   const insightReports = platformFilter === "Semua platform"
@@ -699,6 +819,17 @@ export default function Workspace({ page }: { page: Page }) {
             <ReportsPage
               reports={filteredReports}
               insightReports={insightReports}
+              monthlyReportsCount={reports.filter((report) =>
+                String(report.date ?? "").slice(0, 7) === goalMonth
+                && (goalPlatform === "all" || String(report.platform ?? "").toLowerCase() === goalPlatform),
+              ).length}
+              goalMonth={goalMonth}
+              goalPlatform={goalPlatform}
+              monthlyTarget={monthlyTarget}
+              monthlyTargetLoading={monthlyTargetLoading}
+              setGoalMonth={(month) => { setMonthlyTarget(null); setGoalMonth(month); setMonthlyTargetLoading(true); }}
+              setGoalPlatform={(platform) => { setMonthlyTarget(null); setGoalPlatform(platform); setMonthlyTargetLoading(true); }}
+              saveMonthlyTarget={saveMonthlyTarget}
               schedules={schedules}
               ideas={ideas}
               totalFollowers={totalFollowers}
@@ -707,11 +838,16 @@ export default function Workspace({ page }: { page: Page }) {
               accessToken={accessToken}
               period={period}
               setPeriod={setPeriod}
+              weekStart={weekStart}
+              weekEnd={weekEnd}
+              currentMonth={currentMonth}
               query={query}
               setQuery={setQuery}
               platformFilter={platformFilter}
               setPlatformFilter={setPlatformFilter}
               busy={busy}
+              syncingData={syncingData}
+              syncData={syncData}
               exportCsv={exportCsv}
               openModal={(item) => setModal({ type: "report", item })}
               deleteItem={(item) => removeRecord("reports", item)}
@@ -741,6 +877,8 @@ export default function Workspace({ page }: { page: Page }) {
               move={moveIdea}
               sendToPlanner={sendIdeaToPlanner}
               sync={syncIdea}
+              saveResearchIdea={saveResearchIdea}
+              accessToken={accessToken}
             />
           )}
           {page === "settings" && (
@@ -790,6 +928,14 @@ function PageHeading({ eyebrow, title, description, action }: { eyebrow: string;
 function ReportsPage(props: {
   reports: RecordItem[];
   insightReports: RecordItem[];
+  monthlyReportsCount: number;
+  goalMonth: string;
+  goalPlatform: TargetPlatform;
+  monthlyTarget: number | null;
+  monthlyTargetLoading: boolean;
+  setGoalMonth: (month: string) => void;
+  setGoalPlatform: (platform: TargetPlatform) => void;
+  saveMonthlyTarget: (targetCount: number) => void;
   schedules: RecordItem[];
   ideas: RecordItem[];
   totalFollowers: number;
@@ -798,11 +944,16 @@ function ReportsPage(props: {
   accessToken: string;
   period: string;
   setPeriod: (period: string) => void;
+  weekStart: string;
+  weekEnd: string;
+  currentMonth: string;
   query: string;
   setQuery: (query: string) => void;
   platformFilter: string;
   setPlatformFilter: (platform: string) => void;
   busy: boolean;
+  syncingData: boolean;
+  syncData: () => void;
   exportCsv: () => void;
   openModal: (item?: RecordItem) => void;
   deleteItem: (item: RecordItem) => void;
@@ -814,7 +965,14 @@ function ReportsPage(props: {
     name: platform,
     count: props.insightReports.filter((item) => platformLabel(item.platform) === platform).length,
   }));
-  const maxPlatformCount = Math.max(1, ...platformCounts.map((item) => item.count));
+  const activityReports = props.insightReports.filter((report) =>
+    isReportInPeriod(report, props.period, props.weekStart, props.weekEnd, props.currentMonth),
+  );
+  const activityPlatformCounts = visiblePlatforms.map((platform) => ({
+    name: platform,
+    count: activityReports.filter((item) => platformLabel(item.platform) === platform).length,
+  }));
+  const maxActivityPlatformCount = Math.max(1, ...activityPlatformCounts.map((item) => item.count));
   const upcomingSchedules = props.schedules.filter((schedule) => schedule.status === "draft" || schedule.status === "scheduled");
   const pageCount = Math.max(1, Math.ceil(props.reports.length / reportsPerPage));
   const currentPage = Math.min(page, pageCount);
@@ -834,7 +992,7 @@ function ReportsPage(props: {
   return (
     <>
       <PageHeading eyebrow="RINGKASAN PERFORMA" title="Laporan Sosmed" description="Pahami performa konten dan temukan hal yang paling disukai audiens." action={
-        <div className="heading-actions"><button className="button button-quiet" type="button" onClick={props.exportCsv}><Icon name="download" /> Ekspor CSV</button><button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Tambah laporan</button></div>
+        <div className="heading-actions"><button className="button button-quiet" type="button" onClick={props.exportCsv}><Icon name="download" /> Ekspor CSV</button><button className="button button-quiet" type="button" onClick={props.syncData} disabled={props.busy || props.syncingData}><Icon name="refresh" /> {props.syncingData ? "Menyinkronkan..." : "Sinkron data"}</button><button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Tambah laporan</button></div>
       } />
       <div className="welcome-strip"><div className="welcome-orb"><Icon name="spark" /></div><div><strong>Setiap angka punya cerita.</strong><p>Gunakan ringkasan ini untuk melihat konten mana yang membawa dampak paling besar.</p></div><span className="strip-decoration">INSIGHT / 01</span></div>
       <InstagramInsightsPanel accessToken={props.accessToken} />
@@ -844,15 +1002,27 @@ function ReportsPage(props: {
         <MetricCard label="Total tayangan" value={formatNumber(props.totalViews)} detail="tayangan tercatat" tone="peach" icon="eye" />
         <MetricCard label="Rata-rata engagement" value={`${props.averageEngagement.toFixed(1)}%`} detail="interaksi audiens" tone="mint" icon="heart" />
       </div>
+      <MonthlyTargetPanel
+        key={`${props.goalMonth}-${props.goalPlatform}-${props.monthlyTarget ?? "unset"}`}
+        month={props.goalMonth}
+        platform={props.goalPlatform}
+        target={props.monthlyTarget}
+        count={props.monthlyReportsCount}
+        loading={props.monthlyTargetLoading}
+        busy={props.busy}
+        onMonthChange={props.setGoalMonth}
+        onPlatformChange={props.setGoalPlatform}
+        onSave={props.saveMonthlyTarget}
+      />
       <div className="content-grid analytics-grid">
         <section className="panel trend-panel">
           <div className="panel-heading"><div><p className="eyebrow">OVERVIEW</p><h2>Aktivitas konten</h2></div><div className="segmented">
-            {[["mingguan", "Minggu"], ["bulanan", "Bulan"], ["semua", "Semua"]].map(([value, label]) => <button key={value} type="button" className={props.period === value ? "selected" : ""} onClick={() => setPeriod(value)}>{label}</button>)}
+            {[["mingguan", "Minggu ini"], ["bulanan", "Bulan ini"], ["semua", "Semua"]].map(([value, label]) => <button key={value} type="button" className={props.period === value ? "selected" : ""} onClick={() => setPeriod(value)}>{label}</button>)}
           </div></div>
           <div className="chart-area">
             <div className="chart-y-labels"><span>100</span><span>75</span><span>50</span><span>25</span><span>0</span></div>
             <div className="chart-bars" role="img" aria-label="Jumlah laporan konten per platform">
-                {platformCounts.map((item, index) => <div className="chart-column" key={item.name}><div className={`chart-bar bar-${index}`} style={{ height: `${Math.max(8, item.count / maxPlatformCount * 100)}%` }}><span>{item.count}</span></div><small className="chart-platform-label"><PlatformIcon platform={item.name} />{item.name}</small></div>)}
+                {activityPlatformCounts.map((item, index) => <div className="chart-column" key={item.name}><div className={`chart-bar bar-${index}`} style={{ height: `${Math.max(8, item.count / maxActivityPlatformCount * 100)}%` }}><span>{item.count}</span></div><small className="chart-platform-label"><PlatformIcon platform={item.name} />{item.name}</small></div>)}
               <div className="chart-grid-lines"><i /><i /><i /><i /><i /></div>
             </div>
           </div>
@@ -915,6 +1085,99 @@ function ReportsPage(props: {
         <section className="panel bottom-panel idea-callout"><span className="callout-graphic">✳</span><p className="eyebrow">KUMPULKAN INSPIRASI</p><h2>Punya ide baru?</h2><p>Simpan ide sebelum terlupa, lalu wujudkan jadi konten berikutnya.</p><Link className="button button-dark" href="/ide-konten">Buka papan ide <Icon name="arrow" /></Link></section>
       </div>
     </>
+  );
+}
+
+function MonthlyTargetPanel({
+  month,
+  platform,
+  target,
+  count,
+  loading,
+  busy,
+  onMonthChange,
+  onPlatformChange,
+  onSave,
+}: {
+  month: string;
+  platform: TargetPlatform;
+  target: number | null;
+  count: number;
+  loading: boolean;
+  busy: boolean;
+  onMonthChange: (month: string) => void;
+  onPlatformChange: (platform: TargetPlatform) => void;
+  onSave: (targetCount: number) => void;
+}) {
+  const [targetValue, setTargetValue] = useState(target === null ? "" : String(target));
+  const reached = target !== null && count >= target;
+  const progress = target ? Math.min(100, (count / target) * 100) : 0;
+  const monthLabel = new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" })
+    .format(new Date(`${month}-01T00:00:00`));
+  const platformLabel = targetPlatforms.find((item) => item.id === platform)?.label ?? "Semua platform";
+
+  const submitTarget = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const targetCount = Number(targetValue);
+    if (!Number.isSafeInteger(targetCount) || targetCount < 1 || targetCount > 2_147_483_647) return;
+    onSave(targetCount);
+  };
+
+  return (
+    <section className={`monthly-target panel monthly-target-platform-${platform} ${reached ? "monthly-target-reached" : ""}`} aria-labelledby="monthly-target-title">
+      <div className="monthly-target-summary">
+        <span className="monthly-target-icon" aria-hidden="true">{reached ? "✓" : <Icon name="calendar" />}</span>
+        <div>
+          <p className="eyebrow">TARGET PUBLIKASI BULANAN</p>
+          <h2 id="monthly-target-title">{reached ? "Target tercapai!" : `Target ${platformLabel}`}</h2>
+          <p className="monthly-target-copy">
+            {loading ? "Memuat target..." : target === null
+              ? `Sudah ${count} konten ${platform === "all" ? "di semua platform" : `di ${platformLabel}`} tercatat untuk ${monthLabel}. Tentukan targetnya.`
+              : `${count} dari ${formatNumber(target)} konten ${platform === "all" ? "di semua platform" : `di ${platformLabel}`} untuk ${monthLabel}.`}
+          </p>
+        </div>
+      </div>
+      <div className="monthly-target-platforms" role="group" aria-label="Filter target berdasarkan platform">
+        {targetPlatforms.map((item) => (
+          <button
+            key={item.id}
+            className={platform === item.id ? "selected" : ""}
+            type="button"
+            aria-pressed={platform === item.id}
+            onClick={() => onPlatformChange(item.id)}
+          >
+            {item.id === "all" ? <Icon name="layers" /> : <PlatformIcon platform={item.id} />}
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <div className="monthly-target-progress" aria-label={`${count} dari ${target ?? 0} konten diterbitkan`}>
+        <span style={{ width: `${progress}%` }} />
+      </div>
+      <form className="monthly-target-form" onSubmit={submitTarget}>
+        <label className="monthly-target-field">
+          <span>Bulan</span>
+          <input type="month" value={month} onChange={(event) => { if (event.target.value) onMonthChange(event.target.value); }} />
+        </label>
+        <label className="monthly-target-field">
+          <span>Target konten</span>
+          <input
+            type="number"
+            min="1"
+            max="2147483647"
+            step="1"
+            required
+            value={targetValue}
+            onChange={(event) => setTargetValue(event.target.value)}
+            placeholder="Contoh: 12"
+          />
+        </label>
+        <button className="button button-primary" type="submit" disabled={loading || busy || !targetValue}>
+          {loading ? "Memuat..." : busy ? "Menyimpan..." : "Simpan target"}
+        </button>
+      </form>
+      {reached && <p className="monthly-target-success" role="status">✓ Selamat, target {platformLabel} untuk {monthLabel} sudah tercapai.</p>}
+    </section>
   );
 }
 
@@ -1057,11 +1320,104 @@ function IdeasPage(props: {
   move: (item: RecordItem, column: IdeaColumn) => void;
   sendToPlanner: (item: RecordItem) => void;
   sync: (item: RecordItem) => void;
+  saveResearchIdea: (idea: ResearchIdea) => Promise<void>;
+  accessToken: string;
 }) {
+  const [prompt, setPrompt] = useState("");
+  const [researching, setResearching] = useState(false);
+  const [researchError, setResearchError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [researchResult, setResearchResult] = useState<{
+    summary: string;
+    ideas: ResearchIdea[];
+  } | null>(null);
+  const [savedIndexes, setSavedIndexes] = useState<number[]>([]);
+  const [savingIndex, setSavingIndex] = useState<number | null>(null);
+
+  const researchTrends = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setResearching(true);
+    setResearchError("");
+    setSaveError("");
+    setResearchResult(null);
+    setSavedIndexes([]);
+
+    try {
+      const response = await fetch("/api/ideas/research", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${props.accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const payload = await readApiResponse(response, "Ide konten tidak dapat dibuat.");
+      if (!isObjectRecord(payload.data) || typeof payload.data.summary !== "string" || !Array.isArray(payload.data.ideas)) {
+        throw new Error("Format hasil riset dari server tidak valid.");
+      }
+      const ideas = payload.data.ideas.flatMap((idea): ResearchIdea[] =>
+        isObjectRecord(idea)
+        && typeof idea.title === "string"
+        && typeof idea.description === "string"
+        && isResearchPlatform(idea.platform)
+        && typeof idea.format === "string"
+        && typeof idea.whyItWorks === "string"
+          ? [{ title: idea.title, description: idea.description, platform: idea.platform, format: idea.format, whyItWorks: idea.whyItWorks }]
+          : [],
+      );
+      if (ideas.length === 0) throw new Error("Belum ada ide yang bisa ditampilkan. Coba topik lain.");
+      setResearchResult({ summary: payload.data.summary, ideas });
+    } catch (error) {
+      setResearchError(error instanceof Error ? error.message : "Ide konten tidak dapat dibuat.");
+    } finally {
+      setResearching(false);
+    }
+  };
+
+  const saveSuggestedIdea = async (idea: ResearchIdea, index: number) => {
+    setSavingIndex(index);
+    setSaveError("");
+    try {
+      await props.saveResearchIdea(idea);
+      setSavedIndexes((current) => [...current, index]);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Ide tidak dapat disimpan.");
+    } finally {
+      setSavingIndex(null);
+    }
+  };
+
   return (
     <>
       <PageHeading eyebrow="TANGKAP SEMUA INSPIRASI" title="Ide Konten" description="Papan kecil untuk ide-ide besar. Kembangkan, jadwalkan, dan wujudkan." action={<button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Tambah ide</button>} />
       <div className="ideas-banner"><div className="ideas-banner-symbol"><Icon name="spark" /></div><div><strong>Ide terbaik sering datang tiba-tiba.</strong><p>Simpan di sini, kamu bisa mengembangkannya kapan saja.</p></div><span className="banner-count"><strong>{props.ideas.length}</strong><small>ide tersimpan</small></span></div>
+      <section className="panel trend-research-panel">
+        <div className="panel-heading">
+          <div><p className="eyebrow">GEMINI GRATIS</p><h2>Dapatkan inspirasi ide konten</h2><p className="trend-research-intro">Tuliskan saja permintaanmu. Sebutkan topik, platform, gaya, audiens, atau jumlah ide jika ada. Tanpa pencarian web langsung, hasilnya mungkin tidak mencerminkan tren terkini.</p></div>
+          <span className="trend-ai-mark"><Icon name="spark" /></span>
+        </div>
+        <form className="trend-research-form" onSubmit={(event) => { void researchTrends(event); }}>
+          <label className="field trend-prompt-field"><span>Apa yang ingin kamu buat?</span><textarea required maxLength={600} rows={3} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Contoh: Buat 3 ide konten TikTok tentang kopi untuk mahasiswa, dengan gaya santai dan lucu." /></label>
+          <button className="button button-primary trend-research-submit" type="submit" disabled={researching}>
+            {researching ? <><span className="spinner" /> Menyusun ide...</> : <><Icon name="spark" /> Buat ide</>}
+          </button>
+        </form>
+        {researchError && <p className="trend-research-error" role="alert">{researchError}</p>}
+        {researchResult && (
+          <div className="trend-research-results" aria-live="polite">
+            <p className="trend-research-summary">{researchResult.summary}</p>
+            <div className="trend-idea-grid">{researchResult.ideas.map((idea, index) => (
+              <article className="trend-idea-card" key={`${idea.title}-${index}`}>
+                <span className="trend-idea-number">IDE {index + 1}</span>
+                <h3>{idea.title}</h3>
+                <p>{idea.description}</p>
+                <div className="trend-idea-signal"><strong>Kenapa ide ini menarik</strong><span>{idea.whyItWorks}</span></div>
+                <div className="trend-idea-footer"><span>{platformLabel(idea.platform)} · {idea.format}</span><button className="button button-outline" type="button" onClick={() => { void saveSuggestedIdea(idea, index); }} disabled={savingIndex !== null || savedIndexes.includes(index) || props.busy}>
+                  {savedIndexes.includes(index) ? "Tersimpan" : savingIndex === index ? "Menyimpan..." : "Simpan ide"}
+                </button></div>
+              </article>
+            ))}</div>
+            {saveError && <p className="trend-research-error" role="alert">{saveError}</p>}
+          </div>
+        )}
+      </section>
       <div className="kanban-board">{columns.map((column) => {
         const items = props.ideas.filter((idea) => idea.column === column.id);
         return <section className={`kanban-column column-${column.color}`} key={column.id}>
