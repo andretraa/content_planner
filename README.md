@@ -6,7 +6,7 @@ Dashboard berbahasa Indonesia untuk mengelola ide konten, jadwal publikasi, dan 
 
 - **Laporan Sosmed** — ringkasan performa, target jumlah konten bulanan per platform dengan warna, indikator, dan notifikasi saat tercapai, filter konten, CRUD laporan, dan ekspor CSV.
 - **Content Planner** — kalender bulanan/mingguan, daftar jadwal, pengubahan status, dan sinkronisasi ke laporan.
-- **Ide Konten** — papan Kanban empat tahap, CRUD ide, penjadwalan ide, sinkronisasi ke laporan, serta pembuatan inspirasi ide dengan Gemini pada tier gratis (tanpa pencarian tren langsung).
+- **Ide Konten** — papan Kanban empat tahap, CRUD ide, penjadwalan ide, dan sinkronisasi ke laporan.
 - **Pengaturan** — preferensi akun serta notifikasi.
 - Animasi transisi halaman, kartu, dan dialog; animasi menghormati preferensi `prefers-reduced-motion`.
 
@@ -19,7 +19,7 @@ npm install
 Copy-Item .env.example .env.local
 ```
 
-Isi `.env.local` dengan detail koneksi **Session pooler** Supabase (`DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_SSLMODE=require`, dan `DB_SCHEMA=public`), atau gunakan connection string `DB_URL`. Tambahkan URL project Supabase di `NEXT_PUBLIC_SUPABASE_URL` serta public anon/publishable key di `NEXT_PUBLIC_SUPABASE_ANON_KEY`; jangan gunakan service-role key di browser. Untuk pembuatan ide konten gratis, tambahkan `GEMINI_API_KEY` dari Google AI Studio. Mode gratis tidak memakai Google Search langsung sehingga hasilnya bukan informasi tren terkini; kuota gratis tetap berlaku. Simpan kunci ini hanya di environment server, jangan gunakan prefix `NEXT_PUBLIC_`, commit, atau bagikan kredensial.
+Isi `.env.local` dengan detail koneksi **Session pooler** Supabase (`DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_SSLMODE=require`, dan `DB_SCHEMA=public`), atau gunakan connection string `DB_URL`. Tambahkan URL project Supabase di `NEXT_PUBLIC_SUPABASE_URL` serta public anon/publishable key di `NEXT_PUBLIC_SUPABASE_ANON_KEY`; jangan gunakan service-role key di browser.
 
 Aktifkan Email provider di Supabase Authentication. Jalankan [`database/schema.next.sql`](./database/schema.next.sql) sekali jika database belum mempunyai tabel aplikasi. Untuk tabel yang sudah ada, jalankan [`database/migrations/2026-03-26-add-user-id.sql`](./database/migrations/2026-03-26-add-user-id.sql) sebelum deploy. Migration menambahkan `user_id` kosong untuk data lama; atur `APP_OWNER_EMAIL` ke email akun yang akan memilikinya. Setelah pemilik tersebut masuk, aplikasi akan mengklaim semua baris yang belum memiliki pemilik. Tanpa `APP_OWNER_EMAIL`, data lama tetap tersembunyi sampai dipetakan secara manual. Data baru dibatasi pada akun yang sedang masuk.
 
@@ -65,7 +65,6 @@ Pastikan project Vercel terhubung ke repository GitHub ini, root directory menga
 - `DB_SCHEMA=public`
 - `NEXT_PUBLIC_SUPABASE_URL` — URL project Supabase yang menyediakan Auth.
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — public anon/publishable key project tersebut; jangan gunakan service-role key.
-- `GEMINI_API_KEY` — kunci API server dari Google AI Studio untuk pembuatan ide konten dengan Gemini. Jangan beri prefix `NEXT_PUBLIC_`.
 - `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`, `INSTAGRAM_REDIRECT_URI`, dan `INSTAGRAM_TOKEN_ENCRYPTION_KEY` — kredensial server untuk Instagram Insights. Jangan beri prefix `NEXT_PUBLIC_`.
 - `APP_OWNER_EMAIL` — opsional; email akun yang boleh mengklaim baris lama tanpa `user_id`.
 

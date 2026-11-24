@@ -30,9 +30,6 @@ type ConfirmationState =
   | { type: "save"; collection: Collection; id: string | number; payload: Record<string, FormDataEntryValue>; title: string }
   | { type: "delete"; collection: Collection; item: RecordItem }
   | null;
-type ResearchPlatform = "instagram" | "tiktok" | "threads" | "youtube";
-type ResearchIdea = { title: string; description: string; platform: ResearchPlatform; format: string; whyItWorks: string };
-
 const navigation: { id: Page; label: string; href: string; hint: string }[] = [
   { id: "reports", label: "Laporan Sosmed", href: "/laporan-sosmed", hint: "Analitik & performa" },
   { id: "planner", label: "Content Planner", href: "/content-planner", hint: "Kalender publikasi" },
@@ -173,10 +170,6 @@ async function readApiResponse(response: Response, fallback: string): Promise<Re
 
 function platformClass(value: unknown) {
   return `platform platform-${String(value ?? "instagram").toLowerCase()}`;
-}
-
-function isResearchPlatform(value: unknown): value is ResearchPlatform {
-  return typeof value === "string" && Object.prototype.hasOwnProperty.call(platformLabels, value);
 }
 
 function subscribeToSettings(callback: () => void, key: string) {
@@ -705,18 +698,6 @@ export default function Workspace({ page }: { page: Page }) {
     });
   };
 
-  const saveResearchIdea = async (idea: ResearchIdea) => {
-    await callApi("/api/ideas", "POST", {
-      title: idea.title,
-      description: `${idea.description}\n\nFormat: ${idea.format}\nAlasan ide: ${idea.whyItWorks}`,
-      platform: idea.platform,
-      category: "Ide AI",
-      column: "ideas",
-    });
-    await loadData();
-    setActionNotice("Ide AI berhasil disimpan.");
-  };
-
   const syncIdea = (idea: RecordItem) => {
     void runAction(async () => {
       await callApi(`/api/reports/from-idea/${idea.id}`, "POST", {});
@@ -877,8 +858,6 @@ export default function Workspace({ page }: { page: Page }) {
               move={moveIdea}
               sendToPlanner={sendIdeaToPlanner}
               sync={syncIdea}
-              saveResearchIdea={saveResearchIdea}
-              accessToken={accessToken}
             />
           )}
           {page === "settings" && (
@@ -1320,104 +1299,11 @@ function IdeasPage(props: {
   move: (item: RecordItem, column: IdeaColumn) => void;
   sendToPlanner: (item: RecordItem) => void;
   sync: (item: RecordItem) => void;
-  saveResearchIdea: (idea: ResearchIdea) => Promise<void>;
-  accessToken: string;
 }) {
-  const [prompt, setPrompt] = useState("");
-  const [researching, setResearching] = useState(false);
-  const [researchError, setResearchError] = useState("");
-  const [saveError, setSaveError] = useState("");
-  const [researchResult, setResearchResult] = useState<{
-    summary: string;
-    ideas: ResearchIdea[];
-  } | null>(null);
-  const [savedIndexes, setSavedIndexes] = useState<number[]>([]);
-  const [savingIndex, setSavingIndex] = useState<number | null>(null);
-
-  const researchTrends = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setResearching(true);
-    setResearchError("");
-    setSaveError("");
-    setResearchResult(null);
-    setSavedIndexes([]);
-
-    try {
-      const response = await fetch("/api/ideas/research", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${props.accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
-      });
-      const payload = await readApiResponse(response, "Ide konten tidak dapat dibuat.");
-      if (!isObjectRecord(payload.data) || typeof payload.data.summary !== "string" || !Array.isArray(payload.data.ideas)) {
-        throw new Error("Format hasil riset dari server tidak valid.");
-      }
-      const ideas = payload.data.ideas.flatMap((idea): ResearchIdea[] =>
-        isObjectRecord(idea)
-        && typeof idea.title === "string"
-        && typeof idea.description === "string"
-        && isResearchPlatform(idea.platform)
-        && typeof idea.format === "string"
-        && typeof idea.whyItWorks === "string"
-          ? [{ title: idea.title, description: idea.description, platform: idea.platform, format: idea.format, whyItWorks: idea.whyItWorks }]
-          : [],
-      );
-      if (ideas.length === 0) throw new Error("Belum ada ide yang bisa ditampilkan. Coba topik lain.");
-      setResearchResult({ summary: payload.data.summary, ideas });
-    } catch (error) {
-      setResearchError(error instanceof Error ? error.message : "Ide konten tidak dapat dibuat.");
-    } finally {
-      setResearching(false);
-    }
-  };
-
-  const saveSuggestedIdea = async (idea: ResearchIdea, index: number) => {
-    setSavingIndex(index);
-    setSaveError("");
-    try {
-      await props.saveResearchIdea(idea);
-      setSavedIndexes((current) => [...current, index]);
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Ide tidak dapat disimpan.");
-    } finally {
-      setSavingIndex(null);
-    }
-  };
-
   return (
     <>
       <PageHeading eyebrow="TANGKAP SEMUA INSPIRASI" title="Ide Konten" description="Papan kecil untuk ide-ide besar. Kembangkan, jadwalkan, dan wujudkan." action={<button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Tambah ide</button>} />
       <div className="ideas-banner"><div className="ideas-banner-symbol"><Icon name="spark" /></div><div><strong>Ide terbaik sering datang tiba-tiba.</strong><p>Simpan di sini, kamu bisa mengembangkannya kapan saja.</p></div><span className="banner-count"><strong>{props.ideas.length}</strong><small>ide tersimpan</small></span></div>
-      <section className="panel trend-research-panel">
-        <div className="panel-heading">
-          <div><p className="eyebrow">GEMINI GRATIS</p><h2>Dapatkan inspirasi ide konten</h2><p className="trend-research-intro">Tuliskan saja permintaanmu. Sebutkan topik, platform, gaya, audiens, atau jumlah ide jika ada. Tanpa pencarian web langsung, hasilnya mungkin tidak mencerminkan tren terkini.</p></div>
-          <span className="trend-ai-mark"><Icon name="spark" /></span>
-        </div>
-        <form className="trend-research-form" onSubmit={(event) => { void researchTrends(event); }}>
-          <label className="field trend-prompt-field"><span>Apa yang ingin kamu buat?</span><textarea required maxLength={600} rows={3} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Contoh: Buat 3 ide konten TikTok tentang kopi untuk mahasiswa, dengan gaya santai dan lucu." /></label>
-          <button className="button button-primary trend-research-submit" type="submit" disabled={researching}>
-            {researching ? <><span className="spinner" /> Menyusun ide...</> : <><Icon name="spark" /> Buat ide</>}
-          </button>
-        </form>
-        {researchError && <p className="trend-research-error" role="alert">{researchError}</p>}
-        {researchResult && (
-          <div className="trend-research-results" aria-live="polite">
-            <p className="trend-research-summary">{researchResult.summary}</p>
-            <div className="trend-idea-grid">{researchResult.ideas.map((idea, index) => (
-              <article className="trend-idea-card" key={`${idea.title}-${index}`}>
-                <span className="trend-idea-number">IDE {index + 1}</span>
-                <h3>{idea.title}</h3>
-                <p>{idea.description}</p>
-                <div className="trend-idea-signal"><strong>Kenapa ide ini menarik</strong><span>{idea.whyItWorks}</span></div>
-                <div className="trend-idea-footer"><span>{platformLabel(idea.platform)} · {idea.format}</span><button className="button button-outline" type="button" onClick={() => { void saveSuggestedIdea(idea, index); }} disabled={savingIndex !== null || savedIndexes.includes(index) || props.busy}>
-                  {savedIndexes.includes(index) ? "Tersimpan" : savingIndex === index ? "Menyimpan..." : "Simpan ide"}
-                </button></div>
-              </article>
-            ))}</div>
-            {saveError && <p className="trend-research-error" role="alert">{saveError}</p>}
-          </div>
-        )}
-      </section>
       <div className="kanban-board">{columns.map((column) => {
         const items = props.ideas.filter((idea) => idea.column === column.id);
         return <section className={`kanban-column column-${column.color}`} key={column.id}>

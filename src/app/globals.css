@@ -829,51 +829,6 @@ body {
   50% { opacity: 1; transform: scale(1.12) rotate(8deg); }
 }
 
-.trend-research-panel { margin-bottom: 16px; padding: 18px; border-color: #e0eafa; background: linear-gradient(145deg, #fff, #f8fbff 70%, #f2f7ff); }
-.trend-research-panel .panel-heading { align-items: flex-start; margin-bottom: 15px; }
-.trend-research-panel .panel-heading h2 { margin: 0; color: #203958; font-family: Manrope, sans-serif; font-size: 15px; letter-spacing: -.035em; }
-.trend-research-intro { max-width: 560px; margin: 5px 0 0; color: #71819a; font-size: 10px; line-height: 1.6; }
-.trend-ai-mark { display: grid; width: 35px; height: 35px; flex: none; place-items: center; border: 1px solid #dce9fa; border-radius: 11px; color: #3478d6; background: linear-gradient(145deg, #e1efff, #f3f8ff); }
-.trend-ai-mark .icon { width: 18px; height: 18px; }
-.trend-research-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; }
-.trend-research-form .field { font-size: 9px; }
-.trend-research-form .field input, .trend-research-form .field select { min-height: 38px; border-color: #e0e8f4; }
-.trend-research-form .trend-prompt-field textarea { min-height: 78px; border-color: #e0e8f4; line-height: 1.55; }
-.trend-research-submit { min-height: 38px; gap: 7px; white-space: nowrap; }
-.trend-research-submit:disabled { cursor: wait; opacity: .75; }
-.trend-research-submit .spinner { border-color: #ffffff65; border-top-color: #fff; }
-.trend-research-error { margin: 10px 0 0; color: #a33b43; font-size: 10px; }
-.trend-research-results { margin-top: 16px; padding-top: 14px; border-top: 1px solid #e8eef7; animation: rise-in .35s both; }
-.trend-research-summary { margin: 0 0 12px; color: #536b8e; font-size: 11px; line-height: 1.65; }
-.trend-idea-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
-.trend-idea-card { display: flex; min-width: 0; flex-direction: column; padding: 13px; border: 1px solid #e5edf8; border-radius: 11px; background: #fff; box-shadow: 0 5px 14px rgba(35, 75, 135, .045); }
-.trend-idea-number { color: #397bd3; font-size: 8px; font-weight: 800; letter-spacing: .08em; }
-.trend-idea-card h3 { margin: 6px 0; color: #263d5e; font-size: 12px; line-height: 1.5; }
-.trend-idea-card > p { margin: 0; color: #71819a; font-size: 10px; line-height: 1.65; }
-.trend-idea-signal { display: grid; gap: 4px; margin-top: 11px; padding: 9px; border-radius: 8px; background: #f3f7fd; }
-.trend-idea-signal strong { color: #536c90; font-size: 9px; }
-.trend-idea-signal span { color: #72839a; font-size: 9px; line-height: 1.55; }
-.trend-idea-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 11px; }
-.trend-idea-footer > span { color: #6480a4; font-size: 9px; font-weight: 700; }
-.trend-idea-footer .button { min-height: 29px; padding: 0 9px; font-size: 9px; }
-.trend-idea-footer .button:disabled { cursor: default; opacity: .65; }
-.trend-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 14px; padding-top: 11px; border-top: 1px solid #edf1f7; }
-.trend-sources > strong { margin-right: 2px; color: #506786; font-size: 9px; }
-.trend-sources > a { max-width: 100%; overflow: hidden; padding: 5px 8px; border: 1px solid #e4ecf7; border-radius: 7px; color: #326fc5; background: #f8fbff; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.trend-sources > a:hover { border-color: #c8dcf5; background: #eef6ff; }
-
-@media (max-width: 800px) {
-  .trend-research-form { grid-template-columns: minmax(0, 1fr) auto; }
-  .trend-research-submit { align-self: end; }
-}
-
-@media (max-width: 520px) {
-  .trend-research-panel { padding: 13px; }
-  .trend-research-form { grid-template-columns: 1fr; }
-  .trend-research-submit { justify-self: start; }
-  .trend-idea-grid { grid-template-columns: 1fr; }
-}
-
 .auth-page { display: grid; min-height: 100vh; min-height: 100svh; place-items: center; padding: clamp(12px, 2vw, 22px); background: radial-gradient(ellipse at 7% 10%, rgba(196, 179, 255, .33), transparent 34%), radial-gradient(ellipse at 94% 88%, rgba(255, 202, 220, .35), transparent 32%), #f7f6fc; }
 .auth-shell { display: grid; width: min(100%, 1080px); min-height: 620px; grid-template-columns: minmax(0, 1.02fr) minmax(0, .98fr); overflow: hidden; border: 1px solid rgba(255, 255, 255, .8); border-radius: 30px; background: #fff; box-shadow: 0 30px 90px rgba(46, 34, 86, .13); }
 .auth-showcase { position: relative; display: flex; min-width: 0; flex-direction: column; justify-content: space-between; overflow: hidden; padding: clamp(32px, 5vw, 58px); color: #fff; background: linear-gradient(145deg, #211a39 0%, #37265f 55%, #6843a8 100%); isolation: isolate; }
