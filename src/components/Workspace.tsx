@@ -392,6 +392,7 @@ export default function Workspace({ page }: { page: Page }) {
   const [confirmation, setConfirmation] = useState<ConfirmationState>(null);
   const [printReport, setPrintReport] = useState<RecordItem | null>(null);
   const [printAllOpen, setPrintAllOpen] = useState(false);
+  const [printPlannerOpen, setPrintPlannerOpen] = useState(false);
   const monthlyGoalReached = useRef(false);
   const [query, setQuery] = useState("");
   const [platformFilter, setPlatformFilter] = useState("Semua platform");
@@ -755,6 +756,37 @@ export default function Workspace({ page }: { page: Page }) {
     });
   };
 
+  const platformFilterToGoal = (platform: string): TargetPlatform => {
+    const norm = platform.toLowerCase();
+    if (norm === "semua platform" || norm === "all") return "all";
+    if (norm === "instagram") return "instagram";
+    if (norm === "tiktok") return "tiktok";
+    if (norm === "threads") return "threads";
+    if (norm === "youtube") return "youtube";
+    return "all";
+  };
+
+  const goalToPlatformFilter = (goal: TargetPlatform): string => {
+    if (goal === "all") return "Semua platform";
+    const match = platforms.find((p) => p.toLowerCase() === goal.toLowerCase());
+    return match ?? "Semua platform";
+  };
+
+  const handlePlatformFilterChange = (platform: string) => {
+    setPlatformFilter(platform);
+    const targetPlatform = platformFilterToGoal(platform);
+    setMonthlyTarget(null);
+    setGoalPlatform(targetPlatform);
+    setMonthlyTargetLoading(true);
+  };
+
+  const handleGoalPlatformChange = (platform: TargetPlatform) => {
+    setMonthlyTarget(null);
+    setGoalPlatform(platform);
+    setMonthlyTargetLoading(true);
+    setPlatformFilter(goalToPlatformFilter(platform));
+  };
+
   const today = new Date();
   const { start: weekStart, end: weekEnd } = currentWeekRange(today);
   const currentMonth = dateKey(today).slice(0, 7);
@@ -849,6 +881,7 @@ export default function Workspace({ page }: { page: Page }) {
           {page === "reports" && (
             <ReportsPage
               reports={filteredReports}
+              allReports={reports}
               insightReports={insightReports}
               monthlyReportsCount={reports.filter((report) =>
                 String(report.date ?? "").slice(0, 7) === goalMonth
@@ -860,7 +893,7 @@ export default function Workspace({ page }: { page: Page }) {
               monthlyTargets={monthlyTargets}
               monthlyTargetLoading={monthlyTargetLoading}
               setGoalMonth={(month) => { setMonthlyTarget(null); setGoalMonth(month); setMonthlyTargetLoading(true); }}
-              setGoalPlatform={(platform) => { setMonthlyTarget(null); setGoalPlatform(platform); setMonthlyTargetLoading(true); }}
+              setGoalPlatform={handleGoalPlatformChange}
               saveMonthlyTarget={saveMonthlyTarget}
               schedules={schedules}
               ideas={ideas}
@@ -877,7 +910,7 @@ export default function Workspace({ page }: { page: Page }) {
               query={query}
               setQuery={setQuery}
               platformFilter={platformFilter}
-              setPlatformFilter={setPlatformFilter}
+              setPlatformFilter={handlePlatformFilterChange}
               busy={busy}
               syncingData={syncingData}
               syncData={syncData}
@@ -902,6 +935,7 @@ export default function Workspace({ page }: { page: Page }) {
               publish={publishSchedule}
               sync={syncSchedule}
               moveSchedule={moveScheduleDate}
+              printPlanner={() => setPrintPlannerOpen(true)}
             />
           )}
           {page === "ideas" && (
@@ -963,6 +997,15 @@ export default function Workspace({ page }: { page: Page }) {
           onClose={() => setPrintAllOpen(false)}
         />
       )}
+      {printPlannerOpen && (
+        <PrintPlannerModal
+          schedules={schedules}
+          currentDate={calendarDate}
+          workspaceName={workspaceName}
+          username={username}
+          onClose={() => setPrintPlannerOpen(false)}
+        />
+      )}
       {confirmation && (
         <ConfirmationDialog
           confirmation={confirmation}
@@ -987,6 +1030,7 @@ function PageHeading({ eyebrow, title, description, action }: { eyebrow: string;
 
 function ReportsPage(props: {
   reports: RecordItem[];
+  allReports: RecordItem[];
   insightReports: RecordItem[];
   monthlyReportsCount: number;
   goalMonth: string;
@@ -1094,11 +1138,59 @@ function ReportsPage(props: {
       } />
       {/* Insight Instagram disembunyikan sementara */}
       {false as boolean && <InstagramInsightsPanel accessToken={props.accessToken} />}
-      <div className="metric-grid">
-        <MetricCard label="Total konten" value={formatNumber(props.insightReports.length)} detail="laporan tersimpan" tone="purple" icon="layers" />
-        <MetricCard label="Total followers" value={formatNumber(props.totalFollowers)} detail="followers tercatat" tone="blue" icon="users" />
-        <MetricCard label="Total tayangan" value={formatNumber(props.totalViews)} detail="tayangan tercatat" tone="peach" icon="eye" />
-        <MetricCard label="Rata-rata engagement" value={`${props.averageEngagement.toFixed(1)}%`} detail="interaksi audiens" tone="mint" icon="heart" />
+      <div className="platform-filter-bar" role="group" aria-label="Filter laporan berdasarkan platform">
+        <button
+          type="button"
+          className={`platform-filter-chip ${props.platformFilter === "Semua platform" ? "selected" : ""}`}
+          aria-pressed={props.platformFilter === "Semua platform"}
+          onClick={() => setPlatformFilter("Semua platform")}
+        >
+          Semua platform <span className="platform-filter-count">{props.allReports.length}</span>
+        </button>
+        {platforms.map((platform) => {
+          const count = props.allReports.filter((report) => platformLabel(report.platform) === platform).length;
+          return (
+            <button
+              type="button"
+              key={platform}
+              className={`platform-filter-chip ${props.platformFilter === platform ? "selected" : ""}`}
+              aria-pressed={props.platformFilter === platform}
+              onClick={() => setPlatformFilter(platform)}
+            >
+              <span className={`platform-filter-icon ${platformClass(platform)}`} aria-hidden="true">
+                <PlatformIcon platform={platform} />
+              </span>
+              {platform} <span className="platform-filter-count">{count}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className={`metric-grid ${props.platformFilter === "Semua platform" ? "metric-grid-single" : ""}`}>
+        <MetricCard
+          label="Total konten"
+          value={formatNumber(props.insightReports.length)}
+          detail={props.platformFilter === "Semua platform" ? "laporan tersimpan" : `konten ${props.platformFilter}`}
+          tone="purple"
+          icon="layers"
+        />
+        {props.platformFilter !== "Semua platform" && (
+          <>
+            <MetricCard
+              label="Total followers"
+              value={formatNumber(props.totalFollowers)}
+              detail={`followers ${props.platformFilter}`}
+              tone="blue"
+              icon="users"
+            />
+            <MetricCard
+              label="Total tayangan"
+              value={formatNumber(props.totalViews)}
+              detail={`tayangan ${props.platformFilter}`}
+              tone="peach"
+              icon="eye"
+            />
+          </>
+        )}
       </div>
       <MonthlyTargetPanel
         key={`${props.goalMonth}-${props.goalPlatform}-${props.monthlyTarget ?? "unset"}`}
@@ -1241,11 +1333,11 @@ function ReportsPage(props: {
           <label className="search-box"><Icon name="search" /><input value={props.query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari konten..." /></label>
         </div>
         {props.reports.length === 0 ? <EmptyState title="Belum ada laporan" description="Tambahkan laporan secara manual atau sinkronkan dari kalender dan papan ide." /> : (
-          <div className="table-scroll"><table className="data-table"><thead><tr><th>No.</th><th>Konten</th><th>Platform</th><th>Tanggal</th><th>Followers</th><th>Tayangan</th><th>Jangkauan</th><th>Engagement</th><th><span className="sr-only">Aksi</span></th></tr></thead><tbody>
+          <div className="table-scroll"><table className="data-table"><thead><tr><th>No.</th><th>Konten</th><th>Platform</th><th>Tanggal</th><th>Followers</th><th>Tayangan</th><th><span className="sr-only">Aksi</span></th></tr></thead><tbody>
             {pageReports.map((report, index) => <tr key={report.id}>
               <td>{(currentPage - 1) * reportsPerPage + index + 1}</td>
               <td><div className="content-cell"><span className={`platform-avatar ${platformClass(report.platform)}`}><PlatformIcon platform={platformLabel(report.platform)} /></span><span><strong>{report.title}</strong><small>{report.tag || "Konten"} · {report.description || "—"}</small></span></div></td>
-              <td><span className={platformClass(report.platform)}><PlatformIcon platform={platformLabel(report.platform)} />{platformLabel(report.platform)}</span></td><td>{formatDate(report.date)}</td><td>{formatNumber(report.followers)}</td><td>{formatNumber(report.tayangan)}</td><td>{formatNumber(report.jangkauan)}</td><td><span className="engagement-value">{report.engagement || "—"}</span></td>
+              <td><span className={platformClass(report.platform)}><PlatformIcon platform={platformLabel(report.platform)} />{platformLabel(report.platform)}</span></td><td>{formatDate(report.date)}</td><td>{formatNumber(report.followers)}</td><td>{formatNumber(report.tayangan)}</td>
               <td><div className="row-actions"><button title="Cetak laporan PDF" aria-label={`Cetak laporan ${report.title}`} type="button" onClick={() => props.printItem(report)}><Icon name="print" /></button><button title="Edit laporan" aria-label={`Edit laporan ${report.title}`} type="button" onClick={() => props.openModal(report)} disabled={props.busy}><Icon name="edit" /></button><button title="Hapus laporan" aria-label={`Hapus laporan ${report.title}`} type="button" onClick={() => props.deleteItem(report)} disabled={props.busy}><Icon name="trash" /></button></div></td>
             </tr>)}
           </tbody></table></div>
@@ -1393,6 +1485,7 @@ function PlannerPage(props: {
   publish: (item: RecordItem) => void;
   sync: (item: RecordItem) => void;
   moveSchedule: (schedule: RecordItem, newDate: string) => void;
+  printPlanner: () => void;
 }) {
   const [expandedDates, setExpandedDates] = useState<Set<string>>(() => new Set());
   const [platformFilter, setPlatformFilter] = useState("Semua platform");
@@ -1493,7 +1586,9 @@ function PlannerPage(props: {
   };
   return (
     <>
-      <PageHeading eyebrow="JAGA RITME PUBLIKASI" title="Content Planner" description="Atur ritme kontenmu. Satu kalender, semua platform." action={<button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Buat jadwal</button>} />
+      <PageHeading eyebrow="JAGA RITME PUBLIKASI" title="Content Planner" description="Atur ritme kontenmu. Satu kalender, semua platform." action={
+        <div className="heading-actions"><button className="button button-quiet" type="button" onClick={props.printPlanner} title="Cetak Kalender & Jadwal Konten PDF"><Icon name="print" /> Cetak Kalender</button><button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Buat jadwal</button></div>
+      } />
       <div className="planner-summary">
         <div className="planner-summary-copy"><span className="summary-icon"><Icon name="calendar" /></span><span><strong>{filteredSchedules.length} konten direncanakan</strong><small>{platformFilter === "Semua platform" ? "Di semua platform sosial media" : `Di ${platformFilter}`}</small></span></div>
         <div className="summary-separator" /><div className="planner-summary-copy"><span className="summary-icon summary-icon-peach"><Icon name="clock" /></span><span><strong>{upcomingSchedules.length} menunggu publikasi</strong><small>Selesaikan dan catat performanya</small></span></div>
@@ -1941,8 +2036,18 @@ function RecordModal({ modal, busy, onClose, onSubmit, onPrint }: { modal: Exclu
         {modal.type !== "idea" && <label className="field"><span>Tag / format</span><input name="tag" defaultValue={value("tag") || initial.tag} placeholder="Contoh: Reels" /></label>}
         {modal.type === "idea" && <label className="field"><span>Kategori</span><input name="category" defaultValue={value("category")} placeholder="Contoh: Edukasi" /></label>}
       </div>
-      {modal.type === "report" && <div className="field-grid three-fields"><label className="field"><span>Followers</span><input name="followers" defaultValue={value("followers") === "-" ? "" : value("followers")} placeholder="0" /></label><label className="field"><span>Tayangan</span><input name="tayangan" defaultValue={value("tayangan") === "-" ? "" : value("tayangan")} placeholder="0" /></label><label className="field"><span>Jangkauan</span><input name="jangkauan" defaultValue={value("jangkauan") === "-" ? "" : value("jangkauan")} placeholder="0" /></label></div>}
-      {modal.type === "report" && <div className="field-grid"><label className="field"><span>Tanggal upload</span><input type="date" required name="date" defaultValue={value("date") || initial.date} /></label><label className="field"><span>Engagement</span><input name="engagement" defaultValue={value("engagement") === "-%" ? "" : value("engagement")} placeholder="4.5%" /></label><label className="field"><span>Periode</span><select name="period" defaultValue={value("period") || initial.period}><option value="mingguan">Mingguan</option><option value="bulanan">Bulanan</option></select></label></div>}
+      {modal.type === "report" && (
+        <>
+          <div className="field-grid">
+            <label className="field"><span>Followers</span><input name="followers" defaultValue={value("followers") === "-" ? "" : value("followers")} placeholder="0" /></label>
+            <label className="field"><span>Tayangan</span><input name="tayangan" defaultValue={value("tayangan") === "-" ? "" : value("tayangan")} placeholder="0" /></label>
+          </div>
+          <div className="field-grid">
+            <label className="field"><span>Tanggal upload</span><input type="date" required name="date" defaultValue={value("date") || initial.date} /></label>
+            <label className="field"><span>Periode</span><select name="period" defaultValue={value("period") || initial.period}><option value="mingguan">Mingguan</option><option value="bulanan">Bulanan</option></select></label>
+          </div>
+        </>
+      )}
       {modal.type === "schedule" && <div className="field-grid"><label className="field"><span>Tanggal</span><input type="date" required name="date" defaultValue={value("date") || modal.date || initial.date} /></label><label className="field"><span>Waktu</span><input type="time" required name="time" defaultValue={value("time") || initial.time} /></label><label className="field"><span>Status</span><select name="status" defaultValue={value("status") || initial.status}><option value="scheduled">Terjadwal</option><option value="draft">Draft</option><option value="published">Terbit</option></select></label></div>}
       {modal.type === "idea" && <label className="field"><span>Status ide</span><select name="column" defaultValue={value("column") || modal.column || "ideas"}>{columns.map((column) => <option key={column.id} value={column.id}>{column.label}</option>)}</select></label>}
       <label className="field field-wide"><span>Deskripsi</span><textarea rows={3} name="description" defaultValue={value("description")} placeholder="Tambahkan catatan singkat..." /></label>
@@ -2114,16 +2219,6 @@ function PrintReportModal({
               <span>Interaksi visual konten</span>
             </div>
             <div className="print-metric-box">
-              <small>Jangkauan (Reach)</small>
-              <strong>{formatNumber(report.jangkauan)}</strong>
-              <span>Akun unik audiens</span>
-            </div>
-            <div className="print-metric-box print-metric-highlight">
-              <small>Engagement Rate</small>
-              <strong>{report.engagement || "—"}</strong>
-              <span>Tingkat respons audiens</span>
-            </div>
-            <div className="print-metric-box">
               <small>Followers Tercatat</small>
               <strong>{formatNumber(report.followers)}</strong>
               <span>Basis audiens akun</span>
@@ -2281,7 +2376,7 @@ function PrintAllReportsModal({
             <span>RINGKASAN EKSEKUTIF KINERJA (KEY PERFORMANCE INDICATORS)</span>
           </div>
 
-          <div className="print-metrics-grid print-metrics-4cols">
+          <div className="print-metrics-grid print-metrics-2cols">
             <div className="print-metric-box">
               <small>Total Konten</small>
               <strong>{formatNumber(reports.length)}</strong>
@@ -2291,16 +2386,6 @@ function PrintAllReportsModal({
               <small>Akumulasi Tayangan</small>
               <strong>{formatNumber(calculatedTotalViews)}</strong>
               <span>Total impresi visual</span>
-            </div>
-            <div className="print-metric-box">
-              <small>Total Jangkauan (Reach)</small>
-              <strong>{formatNumber(calculatedTotalReach)}</strong>
-              <span>Total akun unik tercapai</span>
-            </div>
-            <div className="print-metric-box print-metric-highlight">
-              <small>Rata-rata Engagement</small>
-              <strong>{calculatedAvgEngagement.toFixed(1)}%</strong>
-              <span>Interaksi rata-rata audiens</span>
             </div>
           </div>
 
@@ -2316,8 +2401,6 @@ function PrintAllReportsModal({
                       <th>Platform</th>
                       <th>Jumlah Konten</th>
                       <th>Total Tayangan</th>
-                      <th>Total Jangkauan</th>
-                      <th>Rata-rata ER</th>
                       <th>Target Bulanan ({monthLabel})</th>
                     </tr>
                   </thead>
@@ -2336,12 +2419,6 @@ function PrintAllReportsModal({
                           </td>
                           <td><strong>{stat.count} konten</strong></td>
                           <td>{formatNumber(stat.views)}</td>
-                          <td>{formatNumber(stat.reach)}</td>
-                          <td>
-                            <span className="print-er-badge">
-                              {stat.avgEngagement.toFixed(1)}%
-                            </span>
-                          </td>
                           <td>
                             {stat.target !== null && stat.target !== undefined ? (
                               <span className={`print-target-status ${isReached ? "is-reached" : ""}`}>
@@ -2379,8 +2456,6 @@ function PrintAllReportsModal({
                     <th>Tanggal Upload</th>
                     <th>Followers</th>
                     <th>Tayangan</th>
-                    <th>Jangkauan</th>
-                    <th>Engagement</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2407,12 +2482,6 @@ function PrintAllReportsModal({
                       <td className="print-nowrap">{formatDate(report.date)}</td>
                       <td>{formatNumber(report.followers)}</td>
                       <td><strong>{formatNumber(report.tayangan)}</strong></td>
-                      <td>{formatNumber(report.jangkauan)}</td>
-                      <td>
-                        <strong className="print-er-text">
-                          {report.engagement || "—"}
-                        </strong>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -2455,6 +2524,388 @@ function PrintAllReportsModal({
             </div>
             <div className="print-doc-hash">
               <span>CONTENT-PLANNER-REPORT</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PrintPlannerModal({
+  schedules,
+  currentDate,
+  workspaceName,
+  username,
+  onClose,
+}: {
+  schedules: RecordItem[];
+  currentDate: Date;
+  workspaceName: string;
+  username: string;
+  onClose: () => void;
+}) {
+  const [platformFilter, setPlatformFilter] = useState("Semua platform");
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const printedAt = new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+  const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
+  const monthLabel = new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(currentDate);
+
+  const filteredByPlatform = schedules.filter(
+    (s) => platformFilter === "Semua platform" || platformLabel(s.platform) === platformFilter
+  );
+
+  const monthSchedules = filteredByPlatform.filter(
+    (s) => String(s.date).slice(0, 7) === monthKey
+  );
+
+  const scheduledCount = monthSchedules.filter((s) => s.status === "scheduled").length;
+  const draftCount = monthSchedules.filter((s) => s.status === "draft").length;
+  const publishedCount = monthSchedules.filter((s) => s.status === "published").length;
+
+  const platformCounts = platforms.map((plat) => {
+    const count = monthSchedules.filter((s) => platformLabel(s.platform) === plat).length;
+    return { name: plat, count };
+  });
+
+  const daysLabel = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"];
+  const mondayOffset = (day: number) => (day + 6) % 7;
+  const monthStart = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const startOffset = mondayOffset(monthStart.getDay());
+  const totalSlotsNeeded = startOffset + daysInMonth;
+  const dayCount = totalSlotsNeeded > 35 ? 42 : 35;
+  const gridStart = new Date(year, month, 1 - startOffset);
+
+  const calendarDays = Array.from({ length: dayCount }, (_, index) => {
+    const d = new Date(gridStart);
+    d.setDate(gridStart.getDate() + index);
+    return d;
+  });
+
+  const sortedMonthSchedules = [...monthSchedules].sort((a, b) =>
+    `${a.date} ${a.time || "00:00"}`.localeCompare(`${b.date} ${b.time || "00:00"}`)
+  );
+
+  return (
+    <div
+      className="modal-backdrop print-modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="print-modal-container print-modal-wide" role="dialog" aria-modal="true" aria-labelledby="print-planner-title">
+        <div className="print-modal-toolbar no-print">
+          <div className="print-toolbar-title">
+            <Icon name="print" />
+            <div>
+              <strong id="print-planner-title">Cetak Kalender & Rencana Konten</strong>
+              <small>Pratinjau dokumen cetak A4 / Ekspor PDF ({monthLabel} · {monthSchedules.length} Jadwal)</small>
+            </div>
+          </div>
+          <div className="print-toolbar-actions">
+            <select
+              className="print-filter-select"
+              value={platformFilter}
+              onChange={(e) => setPlatformFilter(e.target.value)}
+              aria-label="Filter platform cetak"
+            >
+              <option value="Semua platform">Semua platform</option>
+              {platforms.map((plat) => (
+                <option key={plat} value={plat}>{plat}</option>
+              ))}
+            </select>
+            <button className="button button-primary" type="button" onClick={handlePrint}>
+              <Icon name="print" /> Cetak / Simpan PDF
+            </button>
+            <button className="button button-quiet" type="button" onClick={onClose}>
+              Tutup
+            </button>
+          </div>
+        </div>
+
+        <div className="printable-report-card print-report-full" id="printable-planner-calendar">
+          {/* Header Dokumen */}
+          <div className="print-doc-header">
+            <div className="print-doc-brand">
+              <span className="print-doc-logo">
+                <Icon name="spark" />
+              </span>
+              <div>
+                <h2>CONTENT PLANNER</h2>
+                <p>Dokumen Perencanaan & Kalender Publikasi Konten</p>
+              </div>
+            </div>
+            <div className="print-doc-meta">
+              <span className="print-meta-badge">JADWAL RESMI TERVERIFIKASI</span>
+              <p>
+                <strong>Workspace:</strong> {workspaceName || "Kundrew Studio"} {username ? `(@${username})` : ""}
+              </p>
+              <p>
+                <strong>Periode:</strong> {monthLabel}
+              </p>
+              <p>
+                <strong>Filter Platform:</strong> {platformFilter}
+              </p>
+              <p>
+                <strong>Waktu Cetak:</strong> {printedAt}
+              </p>
+            </div>
+          </div>
+
+          <div className="print-divider" />
+
+          {/* Ringkasan Perencanaan */}
+          <div className="print-section-title">
+            <span>RINGKASAN PERENCANAAN KONTEN ({monthLabel.toUpperCase()})</span>
+          </div>
+
+          <div className="print-metrics-grid print-metrics-4cols">
+            <div className="print-metric-box">
+              <small>Total Konten</small>
+              <strong>{formatNumber(monthSchedules.length)}</strong>
+              <span>Rencana publikasi bulan ini</span>
+            </div>
+            <div className="print-metric-box print-metric-highlight">
+              <small>Menunggu Publikasi</small>
+              <strong>{formatNumber(scheduledCount)}</strong>
+              <span>Status Terjadwal</span>
+            </div>
+            <div className="print-metric-box">
+              <small>Draft Konten</small>
+              <strong>{formatNumber(draftCount)}</strong>
+              <span>Dalam tahap konsep</span>
+            </div>
+            <div className="print-metric-box">
+              <small>Sudah Terbit</small>
+              <strong>{formatNumber(publishedCount)}</strong>
+              <span>Telah dipublikasikan</span>
+            </div>
+          </div>
+
+          {/* Distribusi Platform Chips */}
+          <div className="print-platform-summary-bar">
+            <span className="print-platform-summary-label">Distribusi Jadwal:</span>
+            <div className="print-platform-chips">
+              {platformCounts.map((p) => (
+                <div key={p.name} className="print-platform-chip-item">
+                  <span className={`platform-symbol ${platformClass(p.name)}`}>
+                    <PlatformIcon platform={p.name} />
+                  </span>
+                  <span>{p.name}: <strong>{p.count} konten</strong></span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Kalender Konten Visual */}
+          <div className="print-section-title">
+            <span>TAMPILAN KALENDER KONTEN ({monthLabel.toUpperCase()})</span>
+          </div>
+
+          <div className="print-cal-wrapper">
+            <div className="print-cal-grid">
+              {daysLabel.map((label) => (
+                <div key={label} className="print-cal-weekday">
+                  {label}
+                </div>
+              ))}
+              {calendarDays.map((date) => {
+                const dateId = dateKey(date);
+                const isOutside = date.getMonth() !== month;
+                const isToday = dateId === dateKey(new Date());
+                const daySchedules = filteredByPlatform
+                  .filter((s) => String(s.date).slice(0, 10) === dateId)
+                  .sort((a, b) => String(a.time || "00:00").localeCompare(String(b.time || "00:00")));
+                const hasSchedules = daySchedules.length > 0;
+                const maxVisible = daySchedules.length <= 3 ? 3 : 2;
+                const visibleEvents = daySchedules.slice(0, maxVisible);
+                const remainingCount = daySchedules.length - maxVisible;
+
+                return (
+                  <div
+                    key={dateId}
+                    className={`print-cal-day ${isOutside ? "outside-month" : ""} ${isToday ? "today" : ""} ${hasSchedules ? "has-events" : ""}`}
+                  >
+                    <div className="print-cal-day-head">
+                      <span className="print-cal-date-num">{date.getDate()}</span>
+                      <div className="print-cal-head-meta">
+                        {isToday && <span className="print-cal-today-pill">Hari ini</span>}
+                        {hasSchedules && (
+                          <span className="print-cal-day-count">{daySchedules.length}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="print-cal-events">
+                      {visibleEvents.map((item) => (
+                        <div
+                          key={item.id}
+                          className={`print-cal-event-card status-${item.status}`}
+                        >
+                          <div className="print-cal-card-head">
+                            <span className={`platform-symbol ${platformClass(item.platform)}`}>
+                              <PlatformIcon platform={platformLabel(item.platform)} />
+                            </span>
+                            <span className="print-cal-card-platform">
+                              {platformLabel(item.platform)}
+                            </span>
+                            {item.time && (
+                              <span className="print-cal-card-time">{item.time}</span>
+                            )}
+                          </div>
+                          <div className="print-cal-card-title">{item.title}</div>
+                          {item.tag && (
+                            <div className="print-cal-card-tag">{item.tag}</div>
+                          )}
+                        </div>
+                      ))}
+                      {remainingCount > 0 && (
+                        <div className="print-cal-more-chip">
+                          +{remainingCount} jadwal lainnya
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className={sortedMonthSchedules.length > 0 ? "print-section-page-break" : "print-section-subtle-break"}>
+            {/* Tabel Agenda & Rincian Jadwal */}
+            <div className="print-section-title">
+              <span>AGENDA & RINCIAN JADWAL PUBLIKASI ({sortedMonthSchedules.length} JADWAL)</span>
+            </div>
+
+            {sortedMonthSchedules.length === 0 ? (
+              <div className="print-empty-box">
+                <p>Belum ada jadwal konten yang direncanakan untuk periode {monthLabel}.</p>
+              </div>
+            ) : (
+              <div className="print-table-container">
+                <table className="print-data-table print-planner-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "32px", textAlign: "center" }}>No.</th>
+                      <th style={{ width: "135px" }}>Hari & Tanggal</th>
+                      <th style={{ width: "75px" }}>Waktu</th>
+                      <th style={{ width: "115px" }}>Platform</th>
+                      <th>Judul Konten & Catatan</th>
+                      <th style={{ width: "85px" }}>Format</th>
+                      <th style={{ width: "95px", textAlign: "center" }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedMonthSchedules.map((schedule, idx) => (
+                      <tr key={schedule.id || idx}>
+                        <td className="print-td-num">{idx + 1}</td>
+                        <td className="print-nowrap">
+                          <strong>
+                            {formatDate(schedule.date, {
+                              weekday: "short",
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                          </strong>
+                        </td>
+                        <td className="print-nowrap">
+                          {schedule.time ? (
+                            <span className="print-table-time-pill">{schedule.time}</span>
+                          ) : (
+                            <span className="print-text-muted">—</span>
+                          )}
+                        </td>
+                        <td>
+                          <div className="print-table-platform">
+                            <span className={`platform-symbol ${platformClass(schedule.platform)}`}>
+                              <PlatformIcon platform={platformLabel(schedule.platform)} />
+                            </span>
+                            <strong>{platformLabel(schedule.platform)}</strong>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="print-content-info">
+                            <strong className="print-content-title">{schedule.title}</strong>
+                            {schedule.description && (
+                              <p className="print-content-desc">{schedule.description}</p>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          {schedule.tag ? (
+                            <span className="print-table-tag">{schedule.tag}</span>
+                          ) : (
+                            <span className="print-text-muted">—</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          <span className={`print-status-badge status-${schedule.status}`}>
+                            {schedule.status === "scheduled"
+                              ? "Terjadwal"
+                              : schedule.status === "published"
+                              ? "Terbit"
+                              : "Draft"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Catatan Pelaksanaan */}
+            <div className="print-section-title">
+              <span>PANDUAN OPERASIONAL & EKSEKUSI KONTEN</span>
+            </div>
+            <div className="print-evaluation-box">
+              <p>
+                Seluruh materi visual (foto, video, carousel), copy narasi (caption), dan hashtag harus telah
+                melewati tahap finalisasi selambat-lambatnya 24 jam sebelum jadwal tayang.
+                Setelah konten diterbitkan, periksa respon audiens dan lakukan pencatatan performa pada modul Laporan Sosmed.
+              </p>
+            </div>
+
+            {/* Lembar Tanda Tangan */}
+            <div className="print-signature-grid">
+              <div className="print-sign-col">
+                <span className="print-sign-role">Disusun Oleh:</span>
+                <div className="print-sign-spacer" />
+                <strong>{username ? `@${username}` : "Content Planner"}</strong>
+                <small>Social Media Specialist / Planner</small>
+              </div>
+              <div className="print-sign-col">
+                <span className="print-sign-role">Diverifikasi & Disetujui:</span>
+                <div className="print-sign-spacer" />
+                <strong>{workspaceName || "Kundrew Studio"}</strong>
+                <small>Creative Lead / Workspace Owner</small>
+              </div>
+            </div>
+
+            <div className="print-doc-footer">
+              <div className="print-footer-info">
+                <p>
+                  Dokumen kalender dan jadwal konten resmi digenerate otomatis melalui sistem <strong>Content Planner</strong>.
+                </p>
+                <small>Jadwal dapat disesuaikan kembali secara fleksibel melalui antarmuka kalender interaktif.</small>
+              </div>
+              <div className="print-doc-hash">
+                <span>CONTENT-PLANNER-SCHEDULE</span>
+              </div>
             </div>
           </div>
         </div>

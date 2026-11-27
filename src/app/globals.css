@@ -92,7 +92,8 @@ h1, h2, h3, p { margin-top: 0; }
 .welcome-strip strong, .ideas-banner strong { font-size: 11px; }
 .welcome-strip p, .ideas-banner p { margin: 4px 0 0; color: #89869c; font-size: 10px; }
 .strip-decoration { z-index: 1; margin-left: auto; color: #a69bcf; font-size: 9px; font-weight: 700; letter-spacing: .16em; }
-.metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; margin-bottom: 17px; }
+.metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-bottom: 17px; }
+.metric-grid.metric-grid-single { grid-template-columns: minmax(0, 320px); }
 .metric-card { position: relative; min-height: 128px; overflow: hidden; padding: 15px 16px; border: 1px solid #efedf4; border-radius: 14px; background: #fff; box-shadow: var(--shadow); animation: rise-in .5s both; }
 .metric-card:nth-child(2) { animation-delay: .06s; }.metric-card:nth-child(3) { animation-delay: .12s; }.metric-card:nth-child(4) { animation-delay: .18s; }
 .metric-top { display: flex; align-items: center; justify-content: space-between; color: #898799; font-size: 10px; font-weight: 600; }
@@ -269,7 +270,7 @@ h1, h2, h3, p { margin-top: 0; }
 }
 @media (max-width: 560px) {
   .topbar { padding: 0 14px; }.page-wrap { padding: 20px 13px 30px; }.page-heading { align-items: flex-start; flex-direction: column; gap: 13px; }.heading-actions { width: 100%; }.heading-actions > * { flex: 1; }.page-heading h1 { font-size: 25px; }.page-description { max-width: 350px; line-height: 1.6; }
-  .metric-grid { gap: 8px; }.metric-card { min-height: 111px; padding: 12px; }.metric-top { font-size: 9px; }.metric-value { font-size: 22px; }.welcome-strip { padding: 13px; }.strip-decoration { display: none; }
+  .metric-grid { gap: 8px; }.metric-grid.metric-grid-single { grid-template-columns: 1fr; }.metric-card { min-height: 111px; padding: 12px; }.metric-top { font-size: 9px; }.metric-value { font-size: 22px; }.welcome-strip { padding: 13px; }.strip-decoration { display: none; }
   .trend-panel, .insight-panel, .report-panel, .bottom-panel, .calendar-panel, .upcoming-panel { padding: 14px; }.panel-heading { align-items: flex-start; }.panel-heading h2 { font-size: 13px; }.trend-panel .panel-heading { flex-direction: column; }.chart-area { height: 146px; }.chart-footnote { display: none; }.filter-row select { min-width: 112px; max-width: 46%; }
   .calendar-toolbar { align-items: flex-start; flex-direction: column; }.calendar-title { width: 100%; justify-content: space-between; }.calendar-grid { grid-template-columns: repeat(7, minmax(38px, 1fr)); overflow: hidden; }.calendar-panel { overflow: hidden; }.calendar-day { min-height: 72px; padding: 4px 3px; }.week-grid .calendar-day { min-height: 120px; }.event-chip { padding: 3px; font-size: 7px; }.event-chip .event-time { display: none; }.day-head > span { width: 19px; height: 19px; }.day-head button { opacity: 1; }
   .kanban-board { grid-template-columns: 1fr; }.kanban-column { min-height: auto; }.ideas-banner { padding: 12px; }.banner-count { display: none; }.schedule-row { flex-wrap: wrap; }.schedule-row-main { min-width: calc(100% - 55px); }.schedule-row-actions { width: 100%; justify-content: flex-end; }.schedule-row .status-badge { margin-left: auto; }
@@ -1847,7 +1848,7 @@ strong, b {
 
 .print-metrics-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 24px;
 }
@@ -1960,8 +1961,9 @@ strong, b {
   padding: 44px 40px;
 }
 
-.print-metrics-4cols {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+.print-metrics-4cols,
+.print-metrics-2cols {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .print-table-container {
@@ -2179,6 +2181,327 @@ strong, b {
   letter-spacing: 0.08em;
 }
 
+/* Printable Content Planner Calendar Styles */
+.print-filter-select {
+  padding: 8px 12px;
+  border: 1px solid #ddd7eb;
+  border-radius: 9px;
+  font-size: 11px;
+  background: #fff;
+  color: #322b49;
+  font-weight: 600;
+  outline: none;
+}
+
+.print-platform-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #fbfafc;
+  border: 1px solid #ede9f6;
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 24px;
+}
+
+.print-platform-summary-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #584f79;
+}
+
+.print-platform-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.print-platform-chip-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #282142;
+}
+
+.print-platform-chip-item .platform-symbol {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+  border-radius: 5px;
+}
+
+.print-cal-wrapper {
+  border: 1px solid #e3e0ee;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 24px;
+  background: #fff;
+}
+
+.print-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-top: 1px solid #ede9f6;
+}
+
+.print-cal-weekday {
+  padding: 9px 6px;
+  background: #f7f5fb;
+  color: #574e78;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-right: 1px solid #ede9f6;
+}
+
+.print-cal-weekday:last-child {
+  border-right: none;
+}
+
+.print-cal-day {
+  min-height: 95px;
+  padding: 6px;
+  border-right: 1px solid #ede9f6;
+  border-bottom: 1px solid #ede9f6;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: background 0.15s ease;
+}
+
+.print-cal-day:nth-child(7n) {
+  border-right: none;
+}
+
+.print-cal-day.outside-month {
+  background: #faf9fc;
+}
+
+.print-cal-day.outside-month .print-cal-date-num {
+  color: #c4c1d1;
+}
+
+.print-cal-day.today {
+  background: #fcfbff;
+}
+
+.print-cal-day.has-events {
+  background: #ffffff;
+}
+
+.print-cal-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 3px;
+  padding-bottom: 3px;
+  border-bottom: 1px dashed #f0edf6;
+}
+
+.print-cal-date-num {
+  font-size: 11px;
+  font-weight: 800;
+  color: #2b2449;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+.print-cal-day.today .print-cal-date-num {
+  background: #6d42e6;
+  color: #fff;
+}
+
+.print-cal-head-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.print-cal-today-pill {
+  font-size: 8px;
+  font-weight: 700;
+  background: #ede8ff;
+  color: #6236cc;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.print-cal-day-count {
+  font-size: 8px;
+  font-weight: 800;
+  color: #6d42e6;
+  background: #f0ebfc;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.print-cal-events {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Polished Content Planner Calendar Event Card */
+.print-cal-event-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid #e7e2f2;
+  border-left: 3px solid #7c3aed;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(35, 29, 69, 0.04);
+}
+
+.print-cal-event-card.status-scheduled {
+  border-left-color: #7c3aed;
+  background: #fdfcff;
+}
+
+.print-cal-event-card.status-draft {
+  border-left-color: #d97706;
+  background: #fffdfa;
+  border-color: #f5eedb;
+}
+
+.print-cal-event-card.status-published {
+  border-left-color: #059669;
+  background: #fafdfc;
+  border-color: #d8f1e3;
+}
+
+.print-cal-card-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.print-cal-card-head .platform-symbol {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  font-size: 8px;
+  flex-shrink: 0;
+}
+
+.print-cal-card-head .platform-symbol .platform-icon {
+  width: 10px;
+  height: 10px;
+}
+
+.print-cal-card-platform {
+  font-size: 8.5px;
+  font-weight: 700;
+  color: #383058;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.print-cal-card-time {
+  margin-left: auto;
+  font-size: 8px;
+  font-weight: 700;
+  color: #686185;
+  background: #f2edf8;
+  padding: 1px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.print-cal-card-title {
+  font-size: 9px;
+  font-weight: 700;
+  color: #181236;
+  line-height: 1.3;
+  margin-top: 1px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.print-cal-card-tag {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 7.5px;
+  font-weight: 700;
+  color: #0284c7;
+  background: #e0f2fe;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-top: 1px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.print-cal-more-chip {
+  font-size: 8px;
+  font-weight: 700;
+  color: #6236cc;
+  background: #ede8ff;
+  padding: 2px 5px;
+  border-radius: 4px;
+  text-align: center;
+  margin-top: 1px;
+}
+
+.print-status-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 9999px;
+}
+
+.print-status-badge.status-scheduled {
+  background: #ede8ff;
+  color: #6236cc;
+}
+
+.print-status-badge.status-draft {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.print-status-badge.status-published {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.print-table-time-pill {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #554a7c;
+  background: #f2edf9;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.print-section-page-break {
+  margin-top: 36px;
+  padding-top: 28px;
+  border-top: 2px dashed #ede8f6;
+}
+
+.print-section-subtle-break {
+  margin-top: 24px;
+}
+
 @media (max-width: 680px) {
   .print-modal-toolbar {
     flex-direction: column;
@@ -2224,7 +2547,7 @@ strong, b {
 @media print {
   @page {
     size: A4 portrait;
-    margin: 10mm 12mm;
+    margin: 8mm 10mm;
   }
 
   html,
@@ -2233,10 +2556,21 @@ strong, b {
     color: #0f172a !important;
     margin: 0 !important;
     padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
   }
 
-  body * {
-    visibility: hidden;
+  /* Hide workspace interface outside the print modal */
+  .workspace > *:not(.print-modal-backdrop),
+  .sidebar,
+  .topbar,
+  .main-content,
+  .toast,
+  .alert,
+  .no-print,
+  .print-modal-toolbar {
+    display: none !important;
   }
 
   .print-modal-backdrop {
@@ -2245,32 +2579,31 @@ strong, b {
     background: transparent !important;
     padding: 0 !important;
     margin: 0 !important;
+    width: 100% !important;
+    height: auto !important;
     overflow: visible !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
     inset: auto !important;
   }
 
   .print-modal-container {
+    position: static !important;
+    display: block !important;
     max-width: 100% !important;
     width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
     background: transparent !important;
     box-shadow: none !important;
-  }
-
-  .no-print {
-    display: none !important;
-  }
-
-  .printable-report-card,
-  .printable-report-card * {
-    visibility: visible !important;
+    border: none !important;
   }
 
   .printable-report-card {
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
+    position: static !important;
+    display: block !important;
+    left: auto !important;
+    top: auto !important;
     width: 100% !important;
     max-width: 100% !important;
     margin: 0 !important;
@@ -2283,8 +2616,83 @@ strong, b {
     print-color-adjust: exact !important;
   }
 
+  .print-section-page-break {
+    page-break-before: always !important;
+    break-before: page !important;
+    margin-top: 0 !important;
+    padding-top: 6mm !important;
+    border-top: none !important;
+  }
+
+  .print-cal-wrapper,
+  .print-cal-grid {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .print-cal-day {
+    min-height: 72px !important;
+    padding: 3px !important;
+  }
+
+  .print-cal-event-card {
+    padding: 2.5px 4px !important;
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .print-cal-card-title {
+    font-size: 7.5px !important;
+    line-height: 1.2 !important;
+  }
+
+  .print-cal-card-platform {
+    font-size: 7px !important;
+  }
+
+  .print-cal-card-time {
+    font-size: 6.5px !important;
+    padding: 0 2px !important;
+  }
+
+  .print-cal-card-tag {
+    font-size: 6.5px !important;
+    padding: 0 3px !important;
+  }
+
+  .print-cal-more-chip {
+    font-size: 6.5px !important;
+    padding: 1px 2px !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .print-table-container {
+    overflow: visible !important;
+    border: 1px solid #ddd7eb !important;
+    page-break-inside: auto !important;
+  }
+
+  .print-data-table {
+    font-size: 8.5px !important;
+    page-break-inside: auto !important;
+  }
+
+  .print-data-table th {
+    font-size: 8px !important;
+    padding: 5px 7px !important;
+    background: #f2edf9 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .print-data-table td {
+    padding: 5px 7px !important;
+  }
+
   thead {
-    display: table-header-group;
+    display: table-header-group !important;
   }
 
   tr {
@@ -2300,21 +2708,6 @@ strong, b {
     break-inside: avoid !important;
   }
 
-  .print-data-table {
-    font-size: 9.5px !important;
-  }
-
-  .print-data-table th,
-  .print-data-table td {
-    padding: 6px 8px !important;
-  }
-
-  .print-data-table th {
-    background: #f2eff9 !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-
   .print-info-grid,
   .print-metric-box,
   .print-description-box,
@@ -2322,7 +2715,16 @@ strong, b {
   .print-data-table *,
   .print-er-badge,
   .print-table-tag,
-  .print-target-status {
+  .print-target-status,
+  .print-status-badge,
+  .print-platform-summary-bar,
+  .print-cal-wrapper,
+  .print-cal-weekday,
+  .print-cal-day,
+  .print-cal-today-pill,
+  .print-cal-day-count,
+  .print-table-time-pill,
+  .platform-symbol {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
