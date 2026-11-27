@@ -354,6 +354,11 @@ function Icon({ name }: { name: string }) {
     users: "M16 20v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V20M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.5-6.8a3.5 3.5 0 0 1 0 6.6M17 14.5h.5a4 4 0 0 1 4 4V20",
     eye: "M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Zm9.5-3.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z",
     heart: "M20.8 8.8c0 5.2-8.8 10.1-8.8 10.1S3.2 14 3.2 8.8A4.3 4.3 0 0 1 12 6.9a4.3 4.3 0 0 1 8.8 1.9Z",
+    logout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",
+    target: "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Zm0 6a4 4 0 1 0 4 4 4 4 0 0 0-4-4Z",
+    check: "m5 13 4 4L19 7",
+    filter: "M3 4h18l-7 8.5V19l-4 2v-8.5L3 4Z",
+    print: "M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6v-8Z",
   };
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="icon">
@@ -375,6 +380,7 @@ export default function Workspace({ page }: { page: Page }) {
   const [goalMonth, setGoalMonth] = useState(() => dateKey(new Date()).slice(0, 7));
   const [goalPlatform, setGoalPlatform] = useState<TargetPlatform>("all");
   const [monthlyTarget, setMonthlyTarget] = useState<number | null>(null);
+  const [monthlyTargets, setMonthlyTargets] = useState<Record<string, number>>({});
   const [monthlyTargetLoading, setMonthlyTargetLoading] = useState(true);
   const monthlyCountSnapshot = useRef<{ month: string; platform: TargetPlatform; count: number; target: number | null } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -384,6 +390,8 @@ export default function Workspace({ page }: { page: Page }) {
   const [notice, setNotice] = useState("");
   const [modal, setModal] = useState<ModalState>(null);
   const [confirmation, setConfirmation] = useState<ConfirmationState>(null);
+  const [printReport, setPrintReport] = useState<RecordItem | null>(null);
+  const [printAllOpen, setPrintAllOpen] = useState(false);
   const monthlyGoalReached = useRef(false);
   const [query, setQuery] = useState("");
   const [platformFilter, setPlatformFilter] = useState("Semua platform");
@@ -495,6 +503,9 @@ export default function Workspace({ page }: { page: Page }) {
       setSchedules(scheduleData as RecordItem[]);
       setIdeas(ideaData as RecordItem[]);
       setMonthlyTarget(targetCount);
+      if (isObjectRecord(targetData.targets)) {
+        setMonthlyTargets(targetData.targets as Record<string, number>);
+      }
       return true;
     } catch (loadError) {
       if (activeToken.current !== accessToken) return false;
@@ -683,6 +694,44 @@ export default function Workspace({ page }: { page: Page }) {
     });
   };
 
+  const moveScheduleDate = (schedule: RecordItem, newDate: string) => {
+    if (String(schedule.date).slice(0, 10) === newDate) return;
+    const previousDate = schedule.date;
+    setSchedules((prev) =>
+      prev.map((item) => (item.id === schedule.id ? { ...item, date: newDate } : item))
+    );
+    setReports((prev) =>
+      prev.map((item) =>
+        String(item.schedule_id) === String(schedule.id) ||
+        (item.idea_id && schedule.idea_id && String(item.idea_id) === String(schedule.idea_id)) ||
+        (!item.schedule_id && String(item.title).toLowerCase() === String(schedule.title).toLowerCase() && String(item.platform).toLowerCase() === String(schedule.platform).toLowerCase())
+          ? { ...item, date: newDate }
+          : item
+      )
+    );
+    void runAction(async () => {
+      try {
+        await callApi(`/api/schedules/${schedule.id}`, "PUT", { ...schedule, date: newDate });
+        await loadData();
+        setActionNotice(`Jadwal "${schedule.title}" dipindahkan ke ${formatDate(newDate, { weekday: "short", day: "numeric", month: "short" })}.`);
+      } catch (err) {
+        setSchedules((prev) =>
+          prev.map((item) => (item.id === schedule.id ? { ...item, date: previousDate } : item))
+        );
+        setReports((prev) =>
+          prev.map((item) =>
+            String(item.schedule_id) === String(schedule.id) ||
+            (item.idea_id && schedule.idea_id && String(item.idea_id) === String(schedule.idea_id)) ||
+            (!item.schedule_id && String(item.title).toLowerCase() === String(schedule.title).toLowerCase() && String(item.platform).toLowerCase() === String(schedule.platform).toLowerCase())
+              ? { ...item, date: previousDate }
+              : item
+          )
+        );
+        throw err;
+      }
+    });
+  };
+
   const moveIdea = (idea: RecordItem, column: IdeaColumn) => {
     void runAction(async () => {
       await callApi(`/api/ideas/${idea.id}`, "PUT", { ...idea, column });
@@ -724,6 +773,7 @@ export default function Workspace({ page }: { page: Page }) {
     : reports.filter((report) => platformLabel(report.platform) === platformFilter);
   const totalFollowers = insightReports.reduce((sum, report) => sum + (Number.parseFloat(String(report.followers ?? "").replace(/[^\d.-]/g, "")) || 0), 0);
   const totalViews = insightReports.reduce((sum, report) => sum + (Number.parseFloat(String(report.tayangan ?? "").replace(/[^\d.-]/g, "")) || 0), 0);
+  const totalReach = insightReports.reduce((sum, report) => sum + (Number.parseFloat(String(report.jangkauan ?? "").replace(/[^\d.-]/g, "")) || 0), 0);
   const averageEngagement = insightReports.length
     ? insightReports.reduce((sum, report) => sum + (Number.parseFloat(String(report.engagement ?? "").replace(/[^\d.-]/g, "")) || 0), 0) / insightReports.length
     : 0;
@@ -788,7 +838,7 @@ export default function Workspace({ page }: { page: Page }) {
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumb"><span>{workspaceName}</span><span className="crumb-slash">/</span><strong>{active.label}</strong></div>
-          <div className="topbar-actions"><span className="today-label">{formatDate(dateKey(new Date()), { weekday: "short", day: "numeric", month: "short" })}</span>{username && <span className="today-label">{username}</span>}<WorkspaceAvatar image={profileImage} initial={workspaceInitial} className="top-avatar" /><button className="button button-quiet" type="button" onClick={() => { void signOut(); }}>Keluar</button></div>
+          <div className="topbar-actions"><span className="today-label">{formatDate(dateKey(new Date()), { weekday: "short", day: "numeric", month: "short" })}</span>{username && <span className="today-label">{username}</span>}<WorkspaceAvatar image={profileImage} initial={workspaceInitial} className="top-avatar" /><button className="button button-quiet" type="button" onClick={() => { void signOut(); }}><Icon name="logout" /> Keluar</button></div>
         </header>
         <div className="page-wrap">
           {error && <div className="alert alert-error" role="alert"><span>{error}</span><button type="button"           onClick={() => { setError(""); void loadData(); }}>Coba lagi</button></div>}
@@ -807,6 +857,7 @@ export default function Workspace({ page }: { page: Page }) {
               goalMonth={goalMonth}
               goalPlatform={goalPlatform}
               monthlyTarget={monthlyTarget}
+              monthlyTargets={monthlyTargets}
               monthlyTargetLoading={monthlyTargetLoading}
               setGoalMonth={(month) => { setMonthlyTarget(null); setGoalMonth(month); setMonthlyTargetLoading(true); }}
               setGoalPlatform={(platform) => { setMonthlyTarget(null); setGoalPlatform(platform); setMonthlyTargetLoading(true); }}
@@ -815,6 +866,7 @@ export default function Workspace({ page }: { page: Page }) {
               ideas={ideas}
               totalFollowers={totalFollowers}
               totalViews={totalViews}
+              totalReach={totalReach}
               averageEngagement={averageEngagement}
               accessToken={accessToken}
               period={period}
@@ -831,6 +883,8 @@ export default function Workspace({ page }: { page: Page }) {
               syncData={syncData}
               exportCsv={exportCsv}
               openModal={(item) => setModal({ type: "report", item })}
+              printItem={(item) => setPrintReport(item)}
+              printAll={() => setPrintAllOpen(true)}
               deleteItem={(item) => removeRecord("reports", item)}
               deleteSchedule={(item) => removeRecord("schedules", item)}
             />
@@ -847,6 +901,7 @@ export default function Workspace({ page }: { page: Page }) {
               deleteItem={(item) => removeRecord("schedules", item)}
               publish={publishSchedule}
               sync={syncSchedule}
+              moveSchedule={moveScheduleDate}
             />
           )}
           {page === "ideas" && (
@@ -880,6 +935,32 @@ export default function Workspace({ page }: { page: Page }) {
           busy={busy}
           onClose={() => setModal(null)}
           onSubmit={saveRecord}
+          onPrint={(item) => setPrintReport(item)}
+        />
+      )}
+      {printReport && (
+        <PrintReportModal
+          report={printReport}
+          workspaceName={workspaceName}
+          username={username}
+          onClose={() => setPrintReport(null)}
+        />
+      )}
+      {printAllOpen && (
+        <PrintAllReportsModal
+          reports={filteredReports.length > 0 || query ? filteredReports : insightReports}
+          workspaceName={workspaceName}
+          username={username}
+          platformFilter={platformFilter}
+          period={period}
+          goalMonth={goalMonth}
+          totalFollowers={totalFollowers}
+          totalViews={totalViews}
+          totalReach={totalReach}
+          averageEngagement={averageEngagement}
+          monthlyTargets={monthlyTargets}
+          exportCsv={exportCsv}
+          onClose={() => setPrintAllOpen(false)}
         />
       )}
       {confirmation && (
@@ -911,6 +992,7 @@ function ReportsPage(props: {
   goalMonth: string;
   goalPlatform: TargetPlatform;
   monthlyTarget: number | null;
+  monthlyTargets: Record<string, number>;
   monthlyTargetLoading: boolean;
   setGoalMonth: (month: string) => void;
   setGoalPlatform: (platform: TargetPlatform) => void;
@@ -919,6 +1001,7 @@ function ReportsPage(props: {
   ideas: RecordItem[];
   totalFollowers: number;
   totalViews: number;
+  totalReach: number;
   averageEngagement: number;
   accessToken: string;
   period: string;
@@ -935,15 +1018,49 @@ function ReportsPage(props: {
   syncData: () => void;
   exportCsv: () => void;
   openModal: (item?: RecordItem) => void;
+  printItem: (item: RecordItem) => void;
+  printAll: () => void;
   deleteItem: (item: RecordItem) => void;
   deleteSchedule: (item: RecordItem) => void;
 }) {
   const [page, setPage] = useState(1);
   const visiblePlatforms = props.platformFilter === "Semua platform" ? platforms : [props.platformFilter];
-  const platformCounts = visiblePlatforms.map((platform) => ({
-    name: platform,
-    count: props.insightReports.filter((item) => platformLabel(item.platform) === platform).length,
-  }));
+  const monthLabel = new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" })
+    .format(new Date(`${props.goalMonth}-01T00:00:00`));
+
+  const monthlyPlatformCounts = visiblePlatforms.map((platform) => {
+    const key = platform.toLowerCase();
+    const count = props.insightReports.filter((item) =>
+      String(item.date ?? "").slice(0, 7) === props.goalMonth
+      && platformLabel(item.platform) === platform
+    ).length;
+    const target = props.monthlyTargets[key] ?? null;
+    const isReached = target !== null && count >= target;
+    const percent = target ? Math.min(100, Math.round((count / target) * 100)) : null;
+    const barWidth = target
+      ? Math.min(100, (count / target) * 100)
+      : (count > 0 ? Math.min(100, count * 10) : 0);
+    return {
+      name: platform,
+      count,
+      target,
+      isReached,
+      percent,
+      barWidth,
+    };
+  });
+
+  const totalMonthReports = props.insightReports.filter((report) =>
+    String(report.date ?? "").slice(0, 7) === props.goalMonth
+    && (props.platformFilter === "Semua platform" || platformLabel(report.platform) === props.platformFilter)
+  ).length;
+
+  const currentFilterTarget = props.platformFilter === "Semua platform"
+    ? (props.monthlyTargets["all"] ?? props.monthlyTarget ?? null)
+    : (props.monthlyTargets[props.platformFilter.toLowerCase()] ?? null);
+
+  const isCurrentFilterReached = currentFilterTarget !== null && totalMonthReports >= currentFilterTarget;
+
   const activityReports = props.insightReports.filter((report) =>
     isReportInPeriod(report, props.period, props.weekStart, props.weekEnd, props.currentMonth),
   );
@@ -951,7 +1068,9 @@ function ReportsPage(props: {
     name: platform,
     count: activityReports.filter((item) => platformLabel(item.platform) === platform).length,
   }));
-  const maxActivityPlatformCount = Math.max(1, ...activityPlatformCounts.map((item) => item.count));
+  const rawActivityMax = Math.max(...activityPlatformCounts.map((item) => item.count), 0);
+  const yMax = rawActivityMax === 0 ? 4 : Math.max(4, Math.ceil(rawActivityMax / 4) * 4);
+  const yTicks = [yMax, Math.round(yMax * 0.75), Math.round(yMax * 0.5), Math.round(yMax * 0.25), 0];
   const upcomingSchedules = props.schedules.filter((schedule) => schedule.status === "draft" || schedule.status === "scheduled");
   const pageCount = Math.max(1, Math.ceil(props.reports.length / reportsPerPage));
   const currentPage = Math.min(page, pageCount);
@@ -971,10 +1090,10 @@ function ReportsPage(props: {
   return (
     <>
       <PageHeading eyebrow="RINGKASAN PERFORMA" title="Laporan Sosmed" description="Pahami performa konten dan temukan hal yang paling disukai audiens." action={
-        <div className="heading-actions"><button className="button button-quiet" type="button" onClick={props.exportCsv}><Icon name="download" /> Ekspor CSV</button><button className="button button-quiet" type="button" onClick={props.syncData} disabled={props.busy || props.syncingData}><Icon name="refresh" /> {props.syncingData ? "Menyinkronkan..." : "Sinkron data"}</button><button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Tambah laporan</button></div>
+        <div className="heading-actions"><button className="button button-quiet" type="button" onClick={props.printAll} title="Cetak Rekapitulasi Laporan PDF"><Icon name="print" /> Cetak Laporan</button><button className="button button-quiet" type="button" onClick={props.syncData} disabled={props.busy || props.syncingData}><Icon name="refresh" /> {props.syncingData ? "Menyinkronkan..." : "Sinkron data"}</button><button className="button button-primary" type="button" onClick={() => props.openModal()}><Icon name="plus" /> Tambah laporan</button></div>
       } />
-      <div className="welcome-strip"><div className="welcome-orb"><Icon name="spark" /></div><div><strong>Setiap angka punya cerita.</strong><p>Gunakan ringkasan ini untuk melihat konten mana yang membawa dampak paling besar.</p></div><span className="strip-decoration">INSIGHT / 01</span></div>
-      <InstagramInsightsPanel accessToken={props.accessToken} />
+      {/* Insight Instagram disembunyikan sementara */}
+      {false as boolean && <InstagramInsightsPanel accessToken={props.accessToken} />}
       <div className="metric-grid">
         <MetricCard label="Total konten" value={formatNumber(props.insightReports.length)} detail="laporan tersimpan" tone="purple" icon="layers" />
         <MetricCard label="Total followers" value={formatNumber(props.totalFollowers)} detail="followers tercatat" tone="blue" icon="users" />
@@ -994,28 +1113,126 @@ function ReportsPage(props: {
         onSave={props.saveMonthlyTarget}
       />
       <div className="content-grid analytics-grid">
-        <section className="panel trend-panel">
-          <div className="panel-heading"><div><p className="eyebrow">OVERVIEW</p><h2>Aktivitas konten</h2></div><div className="segmented">
-            {[["mingguan", "Minggu ini"], ["bulanan", "Bulan ini"], ["semua", "Semua"]].map(([value, label]) => <button key={value} type="button" className={props.period === value ? "selected" : ""} onClick={() => setPeriod(value)}>{label}</button>)}
-          </div></div>
-          <div className="chart-area">
-            <div className="chart-y-labels"><span>100</span><span>75</span><span>50</span><span>25</span><span>0</span></div>
-            <div className="chart-bars" role="img" aria-label="Jumlah laporan konten per platform">
-                {activityPlatformCounts.map((item, index) => <div className="chart-column" key={item.name}><div className={`chart-bar bar-${index}`} style={{ height: `${Math.max(8, item.count / maxActivityPlatformCount * 100)}%` }}><span>{item.count}</span></div><small className="chart-platform-label"><PlatformIcon platform={item.name} />{item.name}</small></div>)}
-              <div className="chart-grid-lines"><i /><i /><i /><i /><i /></div>
+        <section className="panel trend-panel" aria-labelledby="overview-chart-title">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">OVERVIEW</p>
+              <h2 id="overview-chart-title">
+                Aktivitas konten
+                <span className="count-pill">{activityReports.length}</span>
+              </h2>
+            </div>
+            <div className="segmented" role="tablist" aria-label="Pilih periode waktu aktivitas">
+              {[["mingguan", "Minggu ini"], ["bulanan", "Bulan ini"], ["semua", "Semua"]].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={props.period === value ? "selected" : ""}
+                  onClick={() => setPeriod(value)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
-          <div className="chart-legend"><span><i className="legend-dot violet" />Laporan konten</span><span className="chart-footnote">Distribusi berdasarkan platform</span></div>
+          <div className="chart-wrapper">
+            <div className="chart-area">
+              <div className="chart-y-labels">
+                {yTicks.map((val, idx) => (
+                  <span key={idx}>{val}</span>
+                ))}
+              </div>
+              <div className="chart-bars" role="img" aria-label="Jumlah laporan konten per platform">
+                <div className="chart-grid-lines">
+                  {yTicks.map((_, idx) => (
+                    <i key={idx} />
+                  ))}
+                </div>
+                {activityPlatformCounts.map((item) => {
+                  const barHeight = rawActivityMax > 0 && item.count > 0
+                    ? Math.max(12, Math.round((item.count / yMax) * 100))
+                    : 0;
+                  return (
+                    <div className="chart-column" key={item.name}>
+                      <div className="chart-bar-container">
+                        <div
+                          className={`chart-bar chart-bar-${item.name.toLowerCase()}`}
+                          style={{ height: `${barHeight}%` }}
+                        >
+                          <span className={`chart-bar-val chart-val-${item.name.toLowerCase()} ${item.count === 0 ? "val-zero" : ""}`}>
+                            {item.count}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="chart-platform-label">
+                        <span className={`platform-symbol platform-symbol-sm ${platformClass(item.name)}`}>
+                          <PlatformIcon platform={item.name} />
+                        </span>
+                        <span className="chart-platform-name">{item.name}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <div className="chart-legend">
+            <div className="chart-legend-items">
+              <span className="chart-legend-badge">
+                <i className="legend-dot" /> {props.period === "mingguan" ? "Minggu ini" : props.period === "bulanan" ? `Bulan ${monthLabel}` : "Semua waktu"}
+              </span>
+              <span className="chart-legend-total">
+                {activityReports.length} total konten tercatat
+              </span>
+            </div>
+            <span className="chart-footnote">Distribusi publikasi per platform</span>
+          </div>
         </section>
         <section className="panel insight-panel">
-          <div className="panel-heading insight-heading"><div><p className="eyebrow">INSIGHT PER PLATFORM</p><h2>{props.platformFilter === "Semua platform" ? "Performa platform" : `Performa ${props.platformFilter}`}</h2></div>
+          <div className="panel-heading insight-heading"><div><p className="eyebrow">INSIGHT PER PLATFORM</p><h2>{props.platformFilter === "Semua platform" ? `Target ${monthLabel}` : `Target ${props.platformFilter} · ${monthLabel}`}</h2></div>
             <select className="insight-filter" value={props.platformFilter} onChange={(event) => setPlatformFilter(event.target.value)} aria-label="Filter insight berdasarkan platform">
               <option>Semua platform</option>{platforms.map((platform) => <option key={platform}>{platform}</option>)}
             </select>
           </div>
-          <p className="insight-filter-hint">Filter ini juga berlaku untuk performa terbaru.</p>
-          <div className="platform-list">{platformCounts.map((item) => <div className="platform-row" key={item.name}><span className={`platform-symbol ${platformClass(item.name)}`}><PlatformIcon platform={item.name} /></span><span className="platform-row-name">{item.name}</span><div className="mini-track"><i style={{ width: `${item.count ? Math.max(5, item.count / Math.max(props.insightReports.length, 1) * 100) : 0}%` }} /></div><strong>{item.count}</strong></div>)}</div>
-          <div className="insight-note"><span>↗</span><p><strong>{props.insightReports.length ? "Konsistensi adalah kunci." : "Mulai catat performa."}</strong><br />{props.insightReports.length ? `Lihat ringkasan konten ${props.platformFilter === "Semua platform" ? "di semua platform" : `di ${props.platformFilter}`}.` : "Tambahkan laporan pertama untuk melihat ringkasan."}</p></div>
+          <p className="insight-filter-hint">Progres publikasi konten bulan {monthLabel} terhadap target.</p>
+          <div className="platform-list">
+            {monthlyPlatformCounts.map((item) => (
+              <div className={`platform-row ${item.isReached ? "target-reached-row" : ""}`} key={item.name}>
+                <span className={`platform-symbol ${platformClass(item.name)}`}><PlatformIcon platform={item.name} /></span>
+                <div className="platform-row-info">
+                  <span className="platform-row-name">{item.name}</span>
+                  <small className="platform-target-ratio">
+                    {item.target !== null ? `${item.count}/${item.target} target` : `${item.count} konten`}
+                  </small>
+                </div>
+                <div className="mini-track">
+                  <i
+                    style={{
+                      width: `${item.barWidth}%`,
+                      background: item.isReached ? "linear-gradient(90deg, #10b981, #059669)" : undefined,
+                    }}
+                  />
+                </div>
+                <strong className={`platform-row-pct ${item.isReached ? "target-reached-text" : ""}`}>
+                  {item.target !== null ? `${item.percent}%` : item.count}
+                </strong>
+              </div>
+            ))}
+          </div>
+          <div className="insight-note">
+            <span>{isCurrentFilterReached ? "✓" : "↗"}</span>
+            <p>
+              <strong>
+                {props.platformFilter === "Semua platform"
+                  ? (isCurrentFilterReached ? `Target semua platform ${monthLabel} tercapai!` : `Target publikasi ${monthLabel}`)
+                  : (isCurrentFilterReached ? `Target ${props.platformFilter} ${monthLabel} tercapai!` : `Target ${props.platformFilter} ${monthLabel}`)}
+              </strong>
+              <br />
+              {currentFilterTarget !== null
+                ? `${totalMonthReports} dari ${currentFilterTarget} target konten ${props.platformFilter === "Semua platform" ? "semua platform" : props.platformFilter} tercatat untuk ${monthLabel} (${currentFilterTarget ? Math.min(100, Math.round((totalMonthReports / currentFilterTarget) * 100)) : 0}% tercapai).`
+                : `${totalMonthReports} konten tercatat untuk ${monthLabel}. Atur target di panel Target Publikasi Bulanan.`}
+            </p>
+          </div>
         </section>
       </div>
       <section className="panel report-panel">
@@ -1029,7 +1246,7 @@ function ReportsPage(props: {
               <td>{(currentPage - 1) * reportsPerPage + index + 1}</td>
               <td><div className="content-cell"><span className={`platform-avatar ${platformClass(report.platform)}`}><PlatformIcon platform={platformLabel(report.platform)} /></span><span><strong>{report.title}</strong><small>{report.tag || "Konten"} · {report.description || "—"}</small></span></div></td>
               <td><span className={platformClass(report.platform)}><PlatformIcon platform={platformLabel(report.platform)} />{platformLabel(report.platform)}</span></td><td>{formatDate(report.date)}</td><td>{formatNumber(report.followers)}</td><td>{formatNumber(report.tayangan)}</td><td>{formatNumber(report.jangkauan)}</td><td><span className="engagement-value">{report.engagement || "—"}</span></td>
-              <td><div className="row-actions"><button title="Edit laporan" aria-label={`Edit laporan ${report.title}`} type="button" onClick={() => props.openModal(report)} disabled={props.busy}><Icon name="edit" /></button><button title="Hapus laporan" aria-label={`Hapus laporan ${report.title}`} type="button" onClick={() => props.deleteItem(report)} disabled={props.busy}><Icon name="trash" /></button></div></td>
+              <td><div className="row-actions"><button title="Cetak laporan PDF" aria-label={`Cetak laporan ${report.title}`} type="button" onClick={() => props.printItem(report)}><Icon name="print" /></button><button title="Edit laporan" aria-label={`Edit laporan ${report.title}`} type="button" onClick={() => props.openModal(report)} disabled={props.busy}><Icon name="edit" /></button><button title="Hapus laporan" aria-label={`Hapus laporan ${report.title}`} type="button" onClick={() => props.deleteItem(report)} disabled={props.busy}><Icon name="trash" /></button></div></td>
             </tr>)}
           </tbody></table></div>
         )}
@@ -1152,7 +1369,7 @@ function MonthlyTargetPanel({
           />
         </label>
         <button className="button button-primary" type="submit" disabled={loading || busy || !targetValue}>
-          {loading ? "Memuat..." : busy ? "Menyimpan..." : "Simpan target"}
+          <Icon name="target" /> {loading ? "Memuat..." : busy ? "Menyimpan..." : "Simpan target"}
         </button>
       </form>
       {reached && <p className="monthly-target-success" role="status">✓ Selamat, target {platformLabel} untuk {monthLabel} sudah tercapai.</p>}
@@ -1175,9 +1392,68 @@ function PlannerPage(props: {
   deleteItem: (item: RecordItem) => void;
   publish: (item: RecordItem) => void;
   sync: (item: RecordItem) => void;
+  moveSchedule: (schedule: RecordItem, newDate: string) => void;
 }) {
   const [expandedDates, setExpandedDates] = useState<Set<string>>(() => new Set());
   const [platformFilter, setPlatformFilter] = useState("Semua platform");
+  const [draggingSchedule, setDraggingSchedule] = useState<RecordItem | null>(null);
+  const [dragOverDate, setDragOverDate] = useState<string | null>(null);
+  const isDraggingRef = useRef(false);
+
+  const handleDragStart = (e: React.DragEvent, item: RecordItem) => {
+    if (props.busy) {
+      e.preventDefault();
+      return;
+    }
+    isDraggingRef.current = true;
+    setDraggingSchedule(item);
+    e.dataTransfer.effectAllowed = "move";
+    try {
+      e.dataTransfer.setData("application/json", JSON.stringify({ id: item.id, date: item.date }));
+      e.dataTransfer.setData("text/plain", String(item.id));
+    } catch {
+      // fallback
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggingSchedule(null);
+    setDragOverDate(null);
+    setTimeout(() => {
+      isDraggingRef.current = false;
+    }, 100);
+  };
+
+  const handleDragOver = (e: React.DragEvent, targetDateId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverDate !== targetDateId) {
+      setDragOverDate(targetDateId);
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent, targetDateId: string) => {
+    e.preventDefault();
+    setDragOverDate(targetDateId);
+  };
+
+  const handleDragLeave = (e: React.DragEvent, targetDateId: string) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    if (dragOverDate === targetDateId) {
+      setDragOverDate(null);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, targetDateId: string) => {
+    e.preventDefault();
+    setDragOverDate(null);
+    const scheduleItem = draggingSchedule || props.schedules.find((s) => String(s.id) === e.dataTransfer.getData("text/plain"));
+    setDraggingSchedule(null);
+    if (!scheduleItem) return;
+    if (String(scheduleItem.date).slice(0, 10) === targetDateId) return;
+    props.moveSchedule(scheduleItem, targetDateId);
+  };
+
   const filteredSchedules = props.schedules.filter((schedule) => platformFilter === "Semua platform" || platformLabel(schedule.platform) === platformFilter);
   const upcomingSchedules = filteredSchedules.filter((schedule) => schedule.status === "scheduled");
   const emptyScheduleState = platformFilter === "Semua platform"
@@ -1249,32 +1525,80 @@ function PlannerPage(props: {
         </div>
         {props.view === "list" ? <div className="schedule-list">{filteredSchedules.length === 0 ? emptyScheduleState : [...filteredSchedules].sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`)).map((item) => <ScheduleRow key={item.id} item={item} edit={() => props.openModal(item)} remove={() => props.deleteItem(item)} publish={() => props.publish(item)} sync={() => props.sync(item)} />)}</div> : (
           <>
-            <div className={`calendar-grid ${props.view === "week" ? "week-grid" : ""}`}>
+            <div
+              className={`calendar-grid ${props.view === "week" ? "week-grid" : ""} ${draggingSchedule ? "is-dragging-active" : ""}`}
+              onDragLeave={(e) => {
+                if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                setDragOverDate(null);
+              }}
+            >
               {daysLabel.map((label) => <div className="calendar-weekday" key={label}>{label}</div>)}
               {calendarDays.map((date, index) => {
                 const dateSchedules = schedulesOn(date);
                 const dateId = dateKey(date);
                 const isExpanded = expandedDates.has(dateId);
                 const visibleSchedules = isExpanded ? dateSchedules : dateSchedules.slice(0, 3);
-                return <div key={dateKey(date)} className={`calendar-day ${props.view === "month" && date.getMonth() !== props.date.getMonth() ? "outside-month" : ""} ${dateKey(date) === dateKey(new Date()) ? "today" : ""} ${props.view === "week" ? `week-day-${index}` : ""}`}>
-                  <div className="day-head"><span>{date.getDate()}</span>{props.view === "week" && <small>{new Intl.DateTimeFormat("id-ID", { month: "short" }).format(date)}</small>}<button type="button" aria-label={`Tambah jadwal ${dateKey(date)}`} onClick={() => props.openModal(undefined, dateKey(date))}>+</button></div>
-                  <div className="day-events">
-                    {visibleSchedules.map((item) => (
-                      <div className="calendar-event-row" key={item.id}>
-                        <button type="button" className={`event-chip event-${item.status}`} onClick={() => props.openModal(item)}>
-                          <span className={`event-platform-mark ${platformClass(item.platform)}`} aria-hidden="true"><PlatformIcon platform={platformLabel(item.platform)} /></span>
-                          <span className="event-time">{item.time}</span><span className="event-title">{item.title}</span>
+                const isDragTarget = dragOverDate === dateId;
+                return (
+                  <div
+                    key={dateKey(date)}
+                    className={`calendar-day ${props.view === "month" && date.getMonth() !== props.date.getMonth() ? "outside-month" : ""} ${dateKey(date) === dateKey(new Date()) ? "today" : ""} ${props.view === "week" ? `week-day-${index}` : ""} ${isDragTarget ? "is-drag-over" : ""}`}
+                    onDragOver={(e) => handleDragOver(e, dateId)}
+                    onDragEnter={(e) => handleDragEnter(e, dateId)}
+                    onDragLeave={(e) => handleDragLeave(e, dateId)}
+                    onDrop={(e) => handleDrop(e, dateId)}
+                  >
+                    <div className="day-head"><span>{date.getDate()}</span>{props.view === "week" && <small>{new Intl.DateTimeFormat("id-ID", { month: "short" }).format(date)}</small>}<button type="button" aria-label={`Tambah jadwal ${dateKey(date)}`} onClick={() => props.openModal(undefined, dateKey(date))}>+</button></div>
+                    <div className="day-events">
+                      {visibleSchedules.map((item) => (
+                        <div
+                          className={`calendar-event-row ${draggingSchedule?.id === item.id ? "is-dragging" : ""}`}
+                          key={item.id}
+                          draggable={!props.busy}
+                          onDragStart={(e) => handleDragStart(e, item)}
+                          onDragEnd={handleDragEnd}
+                          title="Tahan dan geser (drag & drop) untuk memindahkan hari"
+                        >
+                          <button
+                            type="button"
+                            className={`event-chip event-${item.status}`}
+                            draggable={!props.busy}
+                            onDragStart={(e) => handleDragStart(e, item)}
+                            onClick={() => {
+                              if (isDraggingRef.current) return;
+                              props.openModal(item);
+                            }}
+                          >
+                            <span className={`event-platform-mark ${platformClass(item.platform)}`} aria-hidden="true"><PlatformIcon platform={platformLabel(item.platform)} /></span>
+                            <span className="event-time">{item.time}</span><span className="event-title">{item.title}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="event-delete"
+                            title="Hapus jadwal"
+                            aria-label={`Hapus jadwal ${item.title}`}
+                            onClick={() => props.deleteItem(item)}
+                            disabled={props.busy}
+                            draggable={false}
+                            onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          >
+                            <Icon name="trash" />
+                          </button>
+                        </div>
+                      ))}
+                      {isDragTarget && draggingSchedule && String(draggingSchedule.date).slice(0, 10) !== dateId && (
+                        <div className="calendar-drop-slot">
+                          <span>Pindahkan ke sini</span>
+                        </div>
+                      )}
+                      {dateSchedules.length > 3 && (
+                        <button type="button" className="more-events" aria-expanded={isExpanded} onClick={() => toggleDateExpanded(dateId)}>
+                          {isExpanded ? "Sembunyikan" : `+${dateSchedules.length - 3} lainnya`}
                         </button>
-                        <button type="button" className="event-delete" title="Hapus jadwal" aria-label={`Hapus jadwal ${item.title}`} onClick={() => props.deleteItem(item)} disabled={props.busy}><Icon name="trash" /></button>
-                      </div>
-                    ))}
-                    {dateSchedules.length > 3 && (
-                      <button type="button" className="more-events" aria-expanded={isExpanded} onClick={() => toggleDateExpanded(dateId)}>
-                        {isExpanded ? "Sembunyikan" : `+${dateSchedules.length - 3} lainnya`}
-                      </button>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>;
+                );
               })}
             </div>
           </>
@@ -1604,7 +1928,7 @@ function InstagramConnectionSettings({ accessToken }: { accessToken: string }) {
   );
 }
 
-function RecordModal({ modal, busy, onClose, onSubmit }: { modal: Exclude<ModalState, null>; busy: boolean; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+function RecordModal({ modal, busy, onClose, onSubmit, onPrint }: { modal: Exclude<ModalState, null>; busy: boolean; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onPrint?: (item: RecordItem) => void }) {
   const item = modal.item;
   const title = modal.type === "report" ? "laporan" : modal.type === "schedule" ? "jadwal" : "ide";
   const initial: Record<string, string> = modal.type === "report" ? emptyReport : modal.type === "schedule" ? emptySchedule : emptyIdea;
@@ -1622,7 +1946,15 @@ function RecordModal({ modal, busy, onClose, onSubmit }: { modal: Exclude<ModalS
       {modal.type === "schedule" && <div className="field-grid"><label className="field"><span>Tanggal</span><input type="date" required name="date" defaultValue={value("date") || modal.date || initial.date} /></label><label className="field"><span>Waktu</span><input type="time" required name="time" defaultValue={value("time") || initial.time} /></label><label className="field"><span>Status</span><select name="status" defaultValue={value("status") || initial.status}><option value="scheduled">Terjadwal</option><option value="draft">Draft</option><option value="published">Terbit</option></select></label></div>}
       {modal.type === "idea" && <label className="field"><span>Status ide</span><select name="column" defaultValue={value("column") || modal.column || "ideas"}>{columns.map((column) => <option key={column.id} value={column.id}>{column.label}</option>)}</select></label>}
       <label className="field field-wide"><span>Deskripsi</span><textarea rows={3} name="description" defaultValue={value("description")} placeholder="Tambahkan catatan singkat..." /></label>
-      <div className="modal-footer"><button type="button" className="button button-quiet" onClick={onClose}>Batal</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? "Menyimpan..." : "Simpan"} <Icon name="arrow" /></button></div>
+      <div className="modal-footer">
+        {modal.type === "report" && item && onPrint && (
+          <button type="button" className="button button-quiet" onClick={() => onPrint(item)} title="Cetak laporan PDF">
+            <Icon name="print" /> Cetak PDF
+          </button>
+        )}
+        <button type="button" className="button button-quiet" onClick={onClose}>Batal</button>
+        <button type="submit" className="button button-primary" disabled={busy}>{busy ? "Menyimpan..." : "Simpan"} <Icon name="arrow" /></button>
+      </div>
     </form>
   </section></div>;
 }
@@ -1660,6 +1992,473 @@ function ConfirmationDialog({
           </button>
         </div>
       </section>
+    </div>
+  );
+}
+
+function PrintReportModal({
+  report,
+  workspaceName,
+  username,
+  onClose,
+}: {
+  report: RecordItem;
+  workspaceName: string;
+  username: string;
+  onClose: () => void;
+}) {
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const formattedDate = formatDate(report.date, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
+  const printedAt = new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+
+  return (
+    <div
+      className="modal-backdrop print-modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="print-modal-container" role="dialog" aria-modal="true" aria-labelledby="print-title">
+        <div className="print-modal-toolbar no-print">
+          <div className="print-toolbar-title">
+            <Icon name="print" />
+            <div>
+              <strong id="print-title">Cetak Laporan Performa</strong>
+              <small>Pratinjau dokumen cetak A4 / Simpan PDF</small>
+            </div>
+          </div>
+          <div className="print-toolbar-actions">
+            <button className="button button-primary" type="button" onClick={handlePrint}>
+              <Icon name="print" /> Cetak / Simpan PDF
+            </button>
+            <button className="button button-quiet" type="button" onClick={onClose}>
+              Tutup
+            </button>
+          </div>
+        </div>
+
+        <div className="printable-report-card" id="printable-report">
+          <div className="print-doc-header">
+            <div className="print-doc-brand">
+              <span className="print-doc-logo">
+                <Icon name="spark" />
+              </span>
+              <div>
+                <h2>CONTENT PLANNER</h2>
+                <p>Laporan Kinerja & Publikasi Konten</p>
+              </div>
+            </div>
+            <div className="print-doc-meta">
+              <span className="print-meta-badge">DOKUMEN RESMI</span>
+              <p>
+                <strong>ID Laporan:</strong> #{report.id}
+              </p>
+              <p>
+                <strong>Waktu Cetak:</strong> {printedAt}
+              </p>
+            </div>
+          </div>
+
+          <div className="print-divider" />
+
+          <div className="print-info-grid">
+            <div className="print-info-item">
+              <small>JUDUL KONTEN</small>
+              <strong>{report.title}</strong>
+            </div>
+            <div className="print-info-item">
+              <small>PLATFORM & FORMAT</small>
+              <div className="print-platform-val">
+                <span className={`platform-symbol ${platformClass(report.platform)}`}>
+                  <PlatformIcon platform={platformLabel(report.platform)} />
+                </span>
+                <strong>{platformLabel(report.platform)}</strong>
+                {report.tag && <span className="print-tag-pill">{report.tag}</span>}
+              </div>
+            </div>
+            <div className="print-info-item">
+              <small>TANGGAL PUBLIKASI</small>
+              <strong>{formattedDate}</strong>
+            </div>
+            <div className="print-info-item">
+              <small>WORKSPACE / KREATOR</small>
+              <strong>
+                {workspaceName || "Kundrew Studio"} {username ? `(@${username})` : ""}
+              </strong>
+            </div>
+          </div>
+
+          <div className="print-section-title">
+            <span>METRIK & HASIL KINERJA</span>
+          </div>
+
+          <div className="print-metrics-grid">
+            <div className="print-metric-box">
+              <small>Total Tayangan</small>
+              <strong>{formatNumber(report.tayangan)}</strong>
+              <span>Interaksi visual konten</span>
+            </div>
+            <div className="print-metric-box">
+              <small>Jangkauan (Reach)</small>
+              <strong>{formatNumber(report.jangkauan)}</strong>
+              <span>Akun unik audiens</span>
+            </div>
+            <div className="print-metric-box print-metric-highlight">
+              <small>Engagement Rate</small>
+              <strong>{report.engagement || "—"}</strong>
+              <span>Tingkat respons audiens</span>
+            </div>
+            <div className="print-metric-box">
+              <small>Followers Tercatat</small>
+              <strong>{formatNumber(report.followers)}</strong>
+              <span>Basis audiens akun</span>
+            </div>
+          </div>
+
+          <div className="print-section-title">
+            <span>DESKRIPSI & CATATAN KONTEN</span>
+          </div>
+          <div className="print-description-box">
+            <p>{report.description || "Tidak ada catatan deskripsi tambahan untuk konten ini."}</p>
+          </div>
+
+          <div className="print-doc-footer">
+            <div className="print-footer-info">
+              <p>
+                Dokumen performa ini dihasilkan secara otomatis dari data workspace <strong>Content Planner</strong>.
+              </p>
+              <small>Data diverifikasi berdasarkan pencatatan jadwal dan laporan performa konten media sosial.</small>
+            </div>
+            <div className="print-signature-area">
+              <div className="print-sign-line" />
+              <span>Verifikasi Kreator / Admin</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PrintAllReportsModal({
+  reports,
+  workspaceName,
+  username,
+  platformFilter,
+  goalMonth,
+  totalViews,
+  totalReach,
+  averageEngagement,
+  monthlyTargets,
+  exportCsv,
+  onClose,
+}: {
+  reports: RecordItem[];
+  workspaceName: string;
+  username: string;
+  platformFilter: string;
+  period: string;
+  goalMonth: string;
+  totalFollowers: number;
+  totalViews: number;
+  totalReach: number;
+  averageEngagement: number;
+  monthlyTargets: Record<string, number | null | undefined>;
+  exportCsv: () => void;
+  onClose: () => void;
+}) {
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const printedAt = new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+
+  const monthLabel = new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" })
+    .format(new Date(`${goalMonth}-01T00:00:00`));
+
+  const platformStats = platforms.map((plat) => {
+    const items = reports.filter((r) => platformLabel(r.platform) === plat);
+    const views = items.reduce((acc, r) => acc + (Number.parseFloat(String(r.tayangan ?? "").replace(/[^\d.-]/g, "")) || 0), 0);
+    const reach = items.reduce((acc, r) => acc + (Number.parseFloat(String(r.jangkauan ?? "").replace(/[^\d.-]/g, "")) || 0), 0);
+    const avgEng = items.length
+      ? items.reduce((acc, r) => acc + (Number.parseFloat(String(r.engagement ?? "").replace(/[^\d.-]/g, "")) || 0), 0) / items.length
+      : 0;
+    const target = monthlyTargets[plat.toLowerCase()] ?? null;
+    return {
+      platform: plat,
+      count: items.length,
+      views,
+      reach,
+      avgEngagement: avgEng,
+      target,
+    };
+  }).filter((stat) => (platformFilter === "Semua platform" ? stat.count > 0 || (stat.target && stat.target > 0) : stat.platform === platformFilter));
+
+  const calculatedTotalViews = totalViews || reports.reduce((acc, r) => acc + (Number.parseFloat(String(r.tayangan ?? "").replace(/[^\d.-]/g, "")) || 0), 0);
+  const calculatedTotalReach = totalReach || reports.reduce((acc, r) => acc + (Number.parseFloat(String(r.jangkauan ?? "").replace(/[^\d.-]/g, "")) || 0), 0);
+  const calculatedAvgEngagement = reports.length
+    ? reports.reduce((acc, r) => acc + (Number.parseFloat(String(r.engagement ?? "").replace(/[^\d.-]/g, "")) || 0), 0) / reports.length
+    : averageEngagement;
+
+  return (
+    <div
+      className="modal-backdrop print-modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="print-modal-container print-modal-wide" role="dialog" aria-modal="true" aria-labelledby="print-all-title">
+        <div className="print-modal-toolbar no-print">
+          <div className="print-toolbar-title">
+            <Icon name="print" />
+            <div>
+              <strong id="print-all-title">Cetak Rekapitulasi Laporan</strong>
+              <small>Pratinjau dokumen cetak A4 / Ekspor PDF ({reports.length} konten)</small>
+            </div>
+          </div>
+          <div className="print-toolbar-actions">
+            <button className="button button-primary" type="button" onClick={handlePrint}>
+              <Icon name="print" /> Cetak / Simpan PDF
+            </button>
+            <button className="button button-quiet" type="button" onClick={exportCsv} title="Unduh data dalam format CSV">
+              <Icon name="download" /> Ekspor CSV
+            </button>
+            <button className="button button-quiet" type="button" onClick={onClose}>
+              Tutup
+            </button>
+          </div>
+        </div>
+
+        <div className="printable-report-card print-report-full" id="printable-all-reports">
+          <div className="print-doc-header">
+            <div className="print-doc-brand">
+              <span className="print-doc-logo">
+                <Icon name="spark" />
+              </span>
+              <div>
+                <h2>CONTENT PLANNER</h2>
+                <p>Laporan Rekapitulasi Kinerja & Publikasi Media Sosial</p>
+              </div>
+            </div>
+            <div className="print-doc-meta">
+              <span className="print-meta-badge">REKAPITULASI RESMI</span>
+              <p>
+                <strong>Workspace:</strong> {workspaceName || "Kundrew Studio"} {username ? `(@${username})` : ""}
+              </p>
+              <p>
+                <strong>Filter Platform:</strong> {platformFilter}
+              </p>
+              <p>
+                <strong>Waktu Cetak:</strong> {printedAt}
+              </p>
+            </div>
+          </div>
+
+          <div className="print-divider" />
+
+          <div className="print-section-title">
+            <span>RINGKASAN EKSEKUTIF KINERJA (KEY PERFORMANCE INDICATORS)</span>
+          </div>
+
+          <div className="print-metrics-grid print-metrics-4cols">
+            <div className="print-metric-box">
+              <small>Total Konten</small>
+              <strong>{formatNumber(reports.length)}</strong>
+              <span>Publikasi terdata</span>
+            </div>
+            <div className="print-metric-box">
+              <small>Akumulasi Tayangan</small>
+              <strong>{formatNumber(calculatedTotalViews)}</strong>
+              <span>Total impresi visual</span>
+            </div>
+            <div className="print-metric-box">
+              <small>Total Jangkauan (Reach)</small>
+              <strong>{formatNumber(calculatedTotalReach)}</strong>
+              <span>Total akun unik tercapai</span>
+            </div>
+            <div className="print-metric-box print-metric-highlight">
+              <small>Rata-rata Engagement</small>
+              <strong>{calculatedAvgEngagement.toFixed(1)}%</strong>
+              <span>Interaksi rata-rata audiens</span>
+            </div>
+          </div>
+
+          {platformStats.length > 0 && (
+            <>
+              <div className="print-section-title">
+                <span>DISTRIBUSI PERFORMA PER PLATFORM</span>
+              </div>
+              <div className="print-table-container">
+                <table className="print-data-table print-platform-table">
+                  <thead>
+                    <tr>
+                      <th>Platform</th>
+                      <th>Jumlah Konten</th>
+                      <th>Total Tayangan</th>
+                      <th>Total Jangkauan</th>
+                      <th>Rata-rata ER</th>
+                      <th>Target Bulanan ({monthLabel})</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {platformStats.map((stat) => {
+                      const isReached = stat.target !== null && stat.target !== undefined && stat.count >= stat.target;
+                      return (
+                        <tr key={stat.platform}>
+                          <td>
+                            <div className="print-table-platform">
+                              <span className={`platform-symbol ${platformClass(stat.platform)}`}>
+                                <PlatformIcon platform={stat.platform} />
+                              </span>
+                              <strong>{stat.platform}</strong>
+                            </div>
+                          </td>
+                          <td><strong>{stat.count} konten</strong></td>
+                          <td>{formatNumber(stat.views)}</td>
+                          <td>{formatNumber(stat.reach)}</td>
+                          <td>
+                            <span className="print-er-badge">
+                              {stat.avgEngagement.toFixed(1)}%
+                            </span>
+                          </td>
+                          <td>
+                            {stat.target !== null && stat.target !== undefined ? (
+                              <span className={`print-target-status ${isReached ? "is-reached" : ""}`}>
+                                {stat.count}/{stat.target} ({Math.min(100, Math.round((stat.count / stat.target) * 100))}%) {isReached ? "✓ Tercapai" : ""}
+                              </span>
+                            ) : (
+                              <span className="print-text-muted">Belum ada target</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          <div className="print-section-title">
+            <span>DAFTAR DETAIL KONTEN & HASIL PERFORMA ({reports.length} KONTEN)</span>
+          </div>
+
+          {reports.length === 0 ? (
+            <div className="print-empty-box">
+              <p>Tidak ada data laporan konten yang tercatat pada filter ini.</p>
+            </div>
+          ) : (
+            <div className="print-table-container">
+              <table className="print-data-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: "34px", textAlign: "center" }}>No.</th>
+                    <th>Judul Konten & Kategori</th>
+                    <th>Platform</th>
+                    <th>Tanggal Upload</th>
+                    <th>Followers</th>
+                    <th>Tayangan</th>
+                    <th>Jangkauan</th>
+                    <th>Engagement</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reports.map((report, idx) => (
+                    <tr key={report.id || idx}>
+                      <td className="print-td-num">{idx + 1}</td>
+                      <td>
+                        <div className="print-content-info">
+                          <strong className="print-content-title">{report.title}</strong>
+                          {report.tag && <span className="print-table-tag">{report.tag}</span>}
+                          {report.description && (
+                            <p className="print-content-desc">{report.description}</p>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="print-table-platform">
+                          <span className={`platform-symbol ${platformClass(report.platform)}`}>
+                            <PlatformIcon platform={platformLabel(report.platform)} />
+                          </span>
+                          <span>{platformLabel(report.platform)}</span>
+                        </div>
+                      </td>
+                      <td className="print-nowrap">{formatDate(report.date)}</td>
+                      <td>{formatNumber(report.followers)}</td>
+                      <td><strong>{formatNumber(report.tayangan)}</strong></td>
+                      <td>{formatNumber(report.jangkauan)}</td>
+                      <td>
+                        <strong className="print-er-text">
+                          {report.engagement || "—"}
+                        </strong>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="print-section-title">
+            <span>CATATAN EVALUASI & STRATEGI KONTEN</span>
+          </div>
+          <div className="print-evaluation-box">
+            <p>
+              Data di atas merangkum capaian distribusi konten dan interaksi audiens secara transparan.
+              Metrik performa yang tinggi menunjukkan preferensi audiens terhadap topik dan format konten terkait.
+              Gunakan data ini untuk perbaikan strategi kurasi konten pada periode selanjutnya.
+            </p>
+          </div>
+
+          <div className="print-signature-grid">
+            <div className="print-sign-col">
+              <span className="print-sign-role">Disusun Oleh:</span>
+              <div className="print-sign-spacer" />
+              <strong>{username ? `@${username}` : "Kreator Konten"}</strong>
+              <small>Social Media Specialist</small>
+            </div>
+            <div className="print-sign-col">
+              <span className="print-sign-role">Diverifikasi & Disetujui:</span>
+              <div className="print-sign-spacer" />
+              <strong>{workspaceName || "Kundrew Studio"}</strong>
+              <small>Lead / Workspace Owner</small>
+            </div>
+          </div>
+
+          <div className="print-doc-footer">
+            <div className="print-footer-info">
+              <p>
+                Dokumen rekapitulasi performa resmi dibuat otomatis melalui sistem <strong>Content Planner</strong>.
+              </p>
+              <small>Seluruh data diverifikasi berdasarkan pencatatan arsip analitik performa konten.</small>
+            </div>
+            <div className="print-doc-hash">
+              <span>CONTENT-PLANNER-REPORT</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

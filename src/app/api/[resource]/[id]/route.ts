@@ -74,6 +74,24 @@ export async function PUT(request: Request, context: { params: Promise<{ resourc
       [...Object.values(values), id, user.id],
     );
     if (!result.rows[0]) return notFound("Data tidak ditemukan.");
+
+    if (resource === "schedules" && "date" in values && values.date) {
+      await getPool().query(
+        `UPDATE ${tableName("reports")}
+         SET "date" = $1,
+             "title" = COALESCE($4, "title"),
+             "platform" = COALESCE($5, "platform"),
+             "schedule_id" = COALESCE("schedule_id", $3::bigint)
+         WHERE user_id = $2
+           AND (
+             schedule_id = $3::bigint
+             OR (idea_id IS NOT NULL AND idea_id = (SELECT idea_id FROM ${tableName("schedules")} WHERE id = $3::bigint AND user_id = $2))
+             OR (schedule_id IS NULL AND LOWER(title) = LOWER($4) AND LOWER(platform) = LOWER($5))
+           )`,
+        [values.date, user.id, id, values.title, values.platform],
+      );
+    }
+
     return NextResponse.json({ status: "success", message: "Data berhasil diperbarui.", data: result.rows[0] });
   } catch (error) {
     return handleApiError(error);

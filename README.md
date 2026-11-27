@@ -70,6 +70,8 @@ Pastikan project Vercel terhubung ke repository GitHub ini, root directory menga
 
 Sebagai alternatif, atur `DB_URL` memakai connection string **Session pooler** lengkap. Terapkan schema baru atau migration yang sesuai ke database yang akan digunakan, lalu buat deployment baru atau **Redeploy** deployment terbaru agar variabel lingkungan diterapkan. Atur Email provider dan kebijakan konfirmasi pendaftaran di Supabase Authentication. Endpoint API menolak akses tanpa sesi akun yang valid.
 
+Agar data lokal dan deployment selalu sama, gunakan **database Supabase yang sama** di `.env.local` dan Vercel. Salin nilai koneksi database (`DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_SSLMODE`, dan `DB_SCHEMA`) ke environment **Production** Vercel, serta pastikan `NEXT_PUBLIC_SUPABASE_URL` menunjuk ke project Supabase yang sama. Jangan menaruh nilai rahasia di repository atau membagikannya lewat chat. Jika memakai `DB_URL` atau variabel URL PostgreSQL bawaan Vercel, pastikan URL tersebut juga menunjuk ke database yang sama; URL koneksi diprioritaskan daripada `DB_HOST`. Setelah mengubah environment variables, lakukan **Redeploy**. Kedua aplikasi kemudian membaca dan menulis database yang sama—tidak perlu menyalin data secara manual.
+
 ## Route
 
 | Route | Halaman |
